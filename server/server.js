@@ -1,20 +1,27 @@
-
 import http from "node:http";
 import crypto from "node:crypto";
 import express from "express";
+import cors from "cors";
 import { WebSocketServer } from "ws";
 
 const app = express();
 const server = http.createServer(app);
+
+app.use(cors({
+  origin: "*"
+}));
+
+app.use(express.json());
+
 const wss = new WebSocketServer({ server });
 
 const rooms = new Map();
 
 const PORT = process.env.PORT || 8787;
 
-/* ==========================================
+/* =========================================================
    HTTP
-========================================== */
+========================================================= */
 
 app.get("/", (_, res) => {
   res.json({
@@ -31,9 +38,9 @@ app.get("/health", (_, res) => {
   });
 });
 
-/* ==========================================
+/* =========================================================
    CLOUDFLARE TURN
-========================================== */
+========================================================= */
 
 app.get("/turn-credentials", async (_, res) => {
   try {
@@ -50,12 +57,10 @@ app.get("/turn-credentials", async (_, res) => {
       `https://rtc.live.cloudflare.com/v1/turn/keys/${keyId}/credentials/generate-ice-servers`,
       {
         method: "POST",
-
         headers: {
           Authorization: `Bearer ${apiToken}`,
           "Content-Type": "application/json"
         },
-
         body: JSON.stringify({
           ttl: 3600
         })
@@ -65,24 +70,17 @@ app.get("/turn-credentials", async (_, res) => {
     const data = await response.json();
 
     if (!response.ok) {
-      console.error(
-        "Erro Cloudflare TURN:",
-        data
-      );
+      console.error("Erro Cloudflare TURN:", data);
 
       return res.status(500).json({
-        error:
-          "Não foi possível gerar credenciais TURN"
+        error: "Não foi possível gerar credenciais TURN"
       });
     }
 
     res.json(data);
 
   } catch (error) {
-    console.error(
-      "Erro ao gerar TURN:",
-      error
-    );
+    console.error("Erro ao gerar TURN:", error);
 
     res.status(500).json({
       error: "Erro interno ao gerar TURN"
@@ -90,17 +88,19 @@ app.get("/turn-credentials", async (_, res) => {
   }
 });
 
-/* ==========================================
+/* =========================================================
    UTILIDADES
-========================================== */
+========================================================= */
 
 function send(ws, message) {
-  if (ws.readyState === 1) {
+  if (ws && ws.readyState === 1) {
     ws.send(JSON.stringify(message));
   }
 }
 
 function broadcast(room, message, except = null) {
+  if (!room) return;
+
   for (const client of room.clients) {
     if (
       client !== except &&
@@ -112,6 +112,8 @@ function broadcast(room, message, except = null) {
 }
 
 function viewerCount(room) {
+  if (!room) return 0;
+
   return Math.max(
     0,
     room.clients.size -
@@ -120,6 +122,8 @@ function viewerCount(room) {
 }
 
 function updateViewerCount(room) {
+  if (!room) return;
+
   broadcast(room, {
     type: "viewer-count",
     count: viewerCount(room)
@@ -127,6 +131,8 @@ function updateViewerCount(room) {
 }
 
 function findClient(room, id) {
+  if (!room) return null;
+
   for (const client of room.clients) {
     if (client.id === id) {
       return client;
@@ -143,12 +149,11 @@ function generateRoomCode() {
   let code = "";
 
   for (let i = 0; i < 6; i++) {
-    code +=
-      characters[
-        Math.floor(
-          Math.random() * characters.length
-        )
-      ];
+    code += characters[
+      Math.floor(
+        Math.random() * characters.length
+      )
+    ];
   }
 
   return code;
@@ -164,9 +169,9 @@ function createRoomCode() {
   return code;
 }
 
-/* ==========================================
+/* =========================================================
    SAIR DA SALA
-========================================== */
+========================================================= */
 
 function leaveRoom(ws) {
   const room = ws.room;
@@ -174,6 +179,10 @@ function leaveRoom(ws) {
   if (!room) {
     return;
   }
+
+  console.log(
+    `[ROOM] ${ws.id} saindo de ${room.id}`
+  );
 
   if (room.producer === ws) {
     room.producer = null;
@@ -204,11 +213,12 @@ function leaveRoom(ws) {
   }
 }
 
-/* ==========================================
+/* =========================================================
    WEBSOCKET
-========================================== */
+========================================================= */
 
 wss.on("connection", (ws) => {
+
   ws.id = crypto.randomUUID();
   ws.room = null;
   ws.isProducer = false;
@@ -217,7 +227,12 @@ wss.on("connection", (ws) => {
     `[CONNECT] ${ws.id}`
   );
 
+  /* =======================================================
+     MENSAGENS
+  ======================================================= */
+
   ws.on("message", (raw) => {
+
     let msg;
 
     try {
@@ -236,11 +251,12 @@ wss.on("connection", (ws) => {
       `[MESSAGE] ${ws.id} -> ${msg.type}`
     );
 
-    /* ======================================
+    /* =====================================================
        CRIAR SALA
-    ====================================== */
+    ===================================================== */
 
     if (msg.type === "create-room") {
+
       if (ws.room) {
         leaveRoom(ws);
       }
@@ -280,18 +296,21 @@ wss.on("connection", (ws) => {
       return;
     }
 
-    /* ======================================
+    /* =====================================================
        ENTRAR NA SALA
-    ====================================== */
+    ===================================================== */
 
     if (msg.type === "join-room") {
-      const roomId = String(
-        msg.roomId || ""
-      )
+
+      const roomId =
+        String(
+          msg.roomId || ""
+        )
         .trim()
         .toUpperCase();
 
       if (!roomId) {
+
         send(ws, {
           type: "error",
           message:
@@ -305,6 +324,7 @@ wss.on("connection", (ws) => {
         rooms.get(roomId);
 
       if (!room) {
+
         send(ws, {
           type: "error",
           message:
@@ -327,10 +347,12 @@ wss.on("connection", (ws) => {
         roomId
       });
 
+      /* Se já existe transmissão */
       if (
         room.producer &&
         room.producer !== ws
       ) {
+
         send(ws, {
           type: "producer",
           producerId:
@@ -340,7 +362,8 @@ wss.on("connection", (ws) => {
 
       send(ws, {
         type: "viewer-count",
-        count: viewerCount(room)
+        count:
+          viewerCount(room)
       });
 
       updateViewerCount(room);
@@ -352,23 +375,31 @@ wss.on("connection", (ws) => {
       return;
     }
 
-    /* ======================================
-       SAIR
-    ====================================== */
+    /* =====================================================
+       SAIR DA SALA
+    ===================================================== */
 
     if (msg.type === "leave-room") {
+
       leaveRoom(ws);
+
+      send(ws, {
+        type: "left-room"
+      });
+
       return;
     }
 
-    /* ======================================
+    /* =====================================================
        COMEÇAR TRANSMISSÃO
-    ====================================== */
+    ===================================================== */
 
     if (msg.type === "start-sharing") {
+
       const room = ws.room;
 
       if (!room) {
+
         send(ws, {
           type: "error",
           message:
@@ -382,6 +413,7 @@ wss.on("connection", (ws) => {
         room.producer &&
         room.producer !== ws
       ) {
+
         send(ws, {
           type: "error",
           message:
@@ -412,17 +444,19 @@ wss.on("connection", (ws) => {
       return;
     }
 
-    /* ======================================
+    /* =====================================================
        PARAR TRANSMISSÃO
-    ====================================== */
+    ===================================================== */
 
     if (msg.type === "stop-sharing") {
+
       const room = ws.room;
 
       if (
         room &&
         room.producer === ws
       ) {
+
         room.producer = null;
         ws.isProducer = false;
 
@@ -435,16 +469,21 @@ wss.on("connection", (ws) => {
         );
 
         updateViewerCount(room);
+
+        console.log(
+          `[PRODUCER] ${ws.id} parou de transmitir`
+        );
       }
 
       return;
     }
 
-    /* ======================================
-       PEDIR OFFER
-    ====================================== */
+    /* =====================================================
+       REQUEST OFFER
+    ===================================================== */
 
     if (msg.type === "request-offer") {
+
       const room = ws.room;
 
       if (
@@ -465,11 +504,12 @@ wss.on("connection", (ws) => {
       return;
     }
 
-    /* ======================================
+    /* =====================================================
        OFFER
-    ====================================== */
+    ===================================================== */
 
     if (msg.type === "offer") {
+
       const room = ws.room;
 
       if (!room) {
@@ -495,11 +535,12 @@ wss.on("connection", (ws) => {
       return;
     }
 
-    /* ======================================
+    /* =====================================================
        ANSWER
-    ====================================== */
+    ===================================================== */
 
     if (msg.type === "answer") {
+
       const room = ws.room;
 
       if (!room) {
@@ -525,11 +566,12 @@ wss.on("connection", (ws) => {
       return;
     }
 
-    /* ======================================
+    /* =====================================================
        ICE
-    ====================================== */
+    ===================================================== */
 
     if (msg.type === "ice") {
+
       const room = ws.room;
 
       if (!room) {
@@ -549,15 +591,20 @@ wss.on("connection", (ws) => {
       send(target, {
         type: "ice",
         from: ws.id,
-        candidate:
-          msg.candidate
+        candidate: msg.candidate
       });
 
       return;
     }
+
   });
 
+  /* =======================================================
+     CLOSE
+  ======================================================= */
+
   ws.on("close", () => {
+
     console.log(
       `[DISCONNECT] ${ws.id}`
     );
@@ -566,23 +613,27 @@ wss.on("connection", (ws) => {
   });
 
   ws.on("error", (error) => {
+
     console.error(
       `[WS ERROR] ${ws.id}`,
       error
     );
   });
+
 });
 
-/* ==========================================
+/* =========================================================
    START
-========================================== */
+========================================================= */
 
 server.listen(
   PORT,
   "0.0.0.0",
   () => {
+
     console.log(
       `ScreenCast server rodando na porta ${PORT}`
     );
+
   }
 );

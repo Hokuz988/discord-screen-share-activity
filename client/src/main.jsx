@@ -1,11 +1,22 @@
-import React, { useEffect, useRef, useState } from "react";
-import { createRoot } from "react-dom/client";
-import { DiscordSDK } from "@discord/embedded-app-sdk";
+import React, {
+  useEffect,
+  useRef,
+  useState
+} from "react";
+
+import {
+  createRoot
+} from "react-dom/client";
+
+import {
+  DiscordSDK
+} from "@discord/embedded-app-sdk";
+
 import "./style.css";
 
-/* ==========================================
-   CONFIGURAÇÃO
-========================================== */
+/* =========================================================
+   CONFIG
+========================================================= */
 
 const CLIENT_ID =
   import.meta.env.VITE_DISCORD_CLIENT_ID;
@@ -19,21 +30,26 @@ const TURN_SERVER_URL =
 
 let discordSdk = null;
 
-/* ==========================================
-   TURN / ICE SERVERS
-========================================== */
+/* =========================================================
+   TURN
+========================================================= */
 
 async function getIceServers() {
-  try {
-    console.log("Buscando credenciais TURN...");
 
-    const response = await fetch(
-      `${TURN_SERVER_URL}/turn-credentials`,
-      {
-        method: "GET",
-        cache: "no-store"
-      }
+  try {
+
+    console.log(
+      "Buscando credenciais TURN..."
     );
+
+    const response =
+      await fetch(
+        `${TURN_SERVER_URL}/turn-credentials`,
+        {
+          method: "GET",
+          cache: "no-store"
+        }
+      );
 
     if (!response.ok) {
       throw new Error(
@@ -41,62 +57,30 @@ async function getIceServers() {
       );
     }
 
-    const data = await response.json();
+    const data =
+      await response.json();
 
     if (
       !data ||
-      !Array.isArray(data.iceServers)
+      !Array.isArray(
+        data.iceServers
+      )
     ) {
       throw new Error(
-        "Servidor não retornou iceServers válidos."
+        "TURN inválido."
       );
     }
 
-    /*
-     * Remove endpoints na porta 53.
-     * Mantemos UDP, TCP e TURN/TLS.
-     */
-
-    const iceServers =
-      data.iceServers
-        .map((server) => {
-          if (!Array.isArray(server.urls)) {
-            return server;
-          }
-
-          return {
-            ...server,
-            urls: server.urls.filter(
-              (url) => !url.includes(":53")
-            )
-          };
-        })
-        .filter((server) => {
-          if (
-            Array.isArray(server.urls)
-          ) {
-            return server.urls.length > 0;
-          }
-
-          return true;
-        });
-
     console.log(
-      "TURN/ICE configurado:",
-      iceServers.map((server) => ({
-        urls: server.urls,
-        hasUsername:
-          Boolean(server.username),
-        hasCredential:
-          Boolean(server.credential)
-      }))
+      "TURN configurado."
     );
 
-    return iceServers;
+    return data.iceServers;
 
   } catch (error) {
+
     console.error(
-      "Falha ao obter TURN:",
+      "Erro TURN:",
       error
     );
 
@@ -115,11 +99,12 @@ async function getIceServers() {
   }
 }
 
-/* ==========================================
+/* =========================================================
    APP
-========================================== */
+========================================================= */
 
 function App() {
+
   const [
     discordReady,
     setDiscordReady
@@ -128,7 +113,9 @@ function App() {
   const [
     status,
     setStatus
-  ] = useState("Conectando...");
+  ] = useState(
+    "Conectando..."
+  );
 
   const [
     sharing,
@@ -151,8 +138,28 @@ function App() {
   ] = useState("");
 
   const [
-    userName
-  ] = useState("Visitante");
+    roomCode,
+    setRoomCode
+  ] = useState("");
+
+  const [
+    currentRoom,
+    setCurrentRoom
+  ] = useState("");
+
+  const [
+    roomInput,
+    setRoomInput
+  ] = useState("");
+
+  const [
+    inRoom,
+    setInRoom
+  ] = useState(false);
+
+  /* =======================================================
+     REFS
+  ======================================================= */
 
   const localVideo =
     useRef(null);
@@ -173,22 +180,20 @@ function App() {
     useRef(new Map());
 
   const roomId =
-    useRef("discord-activity-room");
+    useRef("");
 
-  /* ==========================================
-     DISCORD SDK
-  ========================================== */
+  /* =======================================================
+     DISCORD
+  ======================================================= */
 
   useEffect(() => {
+
     let alive = true;
 
     async function setupDiscord() {
-      /*
-       * Se não houver Client ID,
-       * funcionamos normalmente no navegador.
-       */
 
       if (!CLIENT_ID) {
+
         console.log(
           "Discord Client ID não configurado."
         );
@@ -203,6 +208,7 @@ function App() {
       }
 
       try {
+
         discordSdk =
           new DiscordSDK(
             CLIENT_ID
@@ -220,13 +226,10 @@ function App() {
           "Conectado ao Discord"
         );
 
-        console.log(
-          "Discord SDK conectado."
-        );
-
       } catch (error) {
+
         console.warn(
-          "Discord SDK falhou:",
+          "Discord SDK:",
           error
         );
 
@@ -241,6 +244,7 @@ function App() {
     setupDiscord();
 
     return () => {
+
       alive = false;
 
       stopSharing();
@@ -252,16 +256,18 @@ function App() {
 
   }, []);
 
-  /* ==========================================
+  /* =========================================================
      WEBSOCKET
-  ========================================== */
+  ========================================================= */
 
   function connectSignal() {
+
+    console.log(
+      "Conectando:",
+      SIGNALING_URL
+    );
+
     try {
-      console.log(
-        "Conectando ao WebSocket:",
-        SIGNALING_URL
-      );
 
       const socket =
         new WebSocket(
@@ -272,6 +278,7 @@ function App() {
         socket;
 
       socket.onopen = () => {
+
         console.log(
           "WebSocket conectado."
         );
@@ -279,37 +286,21 @@ function App() {
         setStatus(
           "Servidor conectado"
         );
-
-        /*
-         * Mantemos o protocolo antigo
-         * compatível com o seu servidor.
-         */
-
-        socket.send(
-          JSON.stringify({
-            type: "join",
-            roomId:
-              roomId.current,
-            name:
-              userName
-          })
-        );
       };
 
       socket.onmessage =
         async (event) => {
+
           let msg;
 
           try {
+
             msg =
               JSON.parse(
                 event.data
               );
-          } catch (error) {
-            console.error(
-              "Mensagem WebSocket inválida:",
-              event.data
-            );
+
+          } catch {
 
             return;
           }
@@ -319,14 +310,117 @@ function App() {
             msg
           );
 
-          /* -------------------------------
+          /* =================================================
+             SALA CRIADA
+          ================================================= */
+
+          if (
+            msg.type ===
+            "room-created"
+          ) {
+
+            const code =
+              msg.roomId;
+
+            roomId.current =
+              code;
+
+            setRoomCode(
+              code
+            );
+
+            setCurrentRoom(
+              code
+            );
+
+            setInRoom(
+              true
+            );
+
+            setStatus(
+              "Sala criada"
+            );
+
+            return;
+          }
+
+          /* =================================================
+             SALA ENTRADA
+          ================================================= */
+
+          if (
+            msg.type ===
+            "room-joined"
+          ) {
+
+            roomId.current =
+              msg.roomId;
+
+            setRoomCode(
+              msg.roomId
+            );
+
+            setCurrentRoom(
+              msg.roomId
+            );
+
+            setInRoom(
+              true
+            );
+
+            setStatus(
+              "Você entrou na sala"
+            );
+
+            return;
+          }
+
+          /* =================================================
+             SAIU
+          ================================================= */
+
+          if (
+            msg.type ===
+            "left-room"
+          ) {
+
+            roomId.current =
+              "";
+
+            setRoomCode(
+              ""
+            );
+
+            setCurrentRoom(
+              ""
+            );
+
+            setInRoom(
+              false
+            );
+
+            setSharing(
+              false
+            );
+
+            setWatching(
+              false
+            );
+
+            closeAllPeers();
+
+            return;
+          }
+
+          /* =================================================
              VIEWER COUNT
-          -------------------------------- */
+          ================================================= */
 
           if (
             msg.type ===
             "viewer-count"
           ) {
+
             setViewerCount(
               msg.count || 0
             );
@@ -334,34 +428,46 @@ function App() {
             return;
           }
 
-          /* -------------------------------
-             PRODUCER
-          -------------------------------- */
+          /* =================================================
+             ERRO
+          ================================================= */
+
+          if (
+            msg.type ===
+            "error"
+          ) {
+
+            setError(
+              msg.message ||
+              "Erro no servidor."
+            );
+
+            return;
+          }
+
+          /* =================================================
+             PRODUTOR
+          ================================================= */
 
           if (
             msg.type ===
             "producer"
           ) {
-            /*
-             * Se nós mesmos estamos
-             * transmitindo, não precisamos
-             * assistir nossa própria transmissão.
-             */
 
             if (
-              sharing ||
-              msg.producerId ===
-                getOwnId()
+              sharing
             ) {
               return;
             }
 
             console.log(
-              "Produtor encontrado:",
+              "Produtor:",
               msg.producerId
             );
 
-            setWatching(true);
+            setWatching(
+              true
+            );
 
             requestOffer(
               msg.producerId
@@ -370,24 +476,25 @@ function App() {
             return;
           }
 
-          /* -------------------------------
-             PRODUCER LEFT
-          -------------------------------- */
+          /* =================================================
+             PRODUTOR SAIU
+          ================================================= */
 
           if (
             msg.type ===
             "producer-left"
           ) {
-            console.log(
-              "Produtor saiu."
-            );
 
-            setWatching(false);
+            setWatching(
+              false
+            );
 
             if (
               remoteVideo.current
             ) {
-              remoteVideo.current.srcObject =
+
+              remoteVideo.current
+                .srcObject =
                 null;
             }
 
@@ -396,42 +503,36 @@ function App() {
             return;
           }
 
-          /* -------------------------------
+          /* =================================================
              REQUEST OFFER
-          -------------------------------- */
+          ================================================= */
 
           if (
             msg.type ===
             "request-offer"
           ) {
-            console.log(
-              "Pedido de offer recebido:",
-              msg.viewerId
-            );
 
             if (
               localStream.current
             ) {
+
               await createPeer(
                 msg.viewerId
-              );
-            } else {
-              console.warn(
-                "Pedido de offer recebido, mas não existe stream local."
               );
             }
 
             return;
           }
 
-          /* -------------------------------
+          /* =================================================
              OFFER
-          -------------------------------- */
+          ================================================= */
 
           if (
             msg.type ===
             "offer"
           ) {
+
             await handleOffer(
               msg
             );
@@ -439,44 +540,40 @@ function App() {
             return;
           }
 
-          /* -------------------------------
+          /* =================================================
              ANSWER
-          -------------------------------- */
+          ================================================= */
 
           if (
             msg.type ===
             "answer"
           ) {
+
             const pc =
               peerConnections.current.get(
                 msg.from
               );
 
             if (!pc) {
-              console.warn(
-                "PeerConnection não encontrada para answer:",
-                msg.from
-              );
-
               return;
             }
 
             try {
+
               await pc.setRemoteDescription(
                 msg.answer
-              );
-
-              console.log(
-                "RemoteDescription da answer configurada."
               );
 
               await flushPendingCandidates(
                 msg.from
               );
 
-            } catch (error) {
+            } catch (
+              error
+            ) {
+
               console.error(
-                "Erro ao configurar answer:",
+                "Erro answer:",
                 error
               );
             }
@@ -484,46 +581,29 @@ function App() {
             return;
           }
 
-          /* -------------------------------
+          /* =================================================
              ICE
-          -------------------------------- */
+          ================================================= */
 
           if (
             msg.type ===
             "ice"
           ) {
+
             await handleIceCandidate(
               msg
             );
 
             return;
           }
-
-          /* -------------------------------
-             ERROR
-          -------------------------------- */
-
-          if (
-            msg.type ===
-            "error"
-          ) {
-            console.error(
-              "Erro do servidor:",
-              msg.message
-            );
-
-            setError(
-              msg.message ||
-              "Erro no servidor."
-            );
-          }
         };
 
       socket.onerror =
-        (event) => {
+        (error) => {
+
           console.error(
-            "WebSocket error:",
-            event
+            "WebSocket:",
+            error
           );
 
           setError(
@@ -532,21 +612,18 @@ function App() {
         };
 
       socket.onclose =
-        (event) => {
-          console.warn(
-            "WebSocket fechado:",
-            event.code,
-            event.reason
-          );
+        () => {
 
           setStatus(
             "Servidor desconectado"
           );
         };
 
-    } catch (error) {
+    } catch (
+      error
+    ) {
+
       console.error(
-        "Erro WebSocket:",
         error
       );
 
@@ -556,65 +633,139 @@ function App() {
     }
   }
 
-  /* ==========================================
-     ID DO USUÁRIO
-  ========================================== */
-
-  function getOwnId() {
-    /*
-     * O ID real fica no WebSocket.
-     * Não precisamos dele no frontend
-     * para o funcionamento normal.
-     */
-
-    return null;
-  }
-
-  /* ==========================================
+  /* =========================================================
      SEND
-  ========================================== */
+  ========================================================= */
 
   function send(message) {
+
     if (
       ws.current &&
       ws.current.readyState ===
-        WebSocket.OPEN
+      WebSocket.OPEN
     ) {
-      const payload = {
-        ...message,
-        roomId:
-          roomId.current
-      };
-
-      console.log(
-        "Enviando:",
-        payload
-      );
 
       ws.current.send(
-        JSON.stringify(
-          payload
-        )
+        JSON.stringify({
+          ...message,
+
+          roomId:
+            roomId.current
+        })
       );
 
-    } else {
-      console.warn(
-        "WebSocket não está conectado."
-      );
     }
   }
 
-  /* ==========================================
-     CAPTURA DA TELA
-  ========================================== */
+  /* =========================================================
+     CRIAR SALA
+  ========================================================= */
 
-  async function startSharing() {
+  function createRoom() {
+
     setError("");
 
-    try {
-      console.log(
-        "Solicitando captura da tela..."
+    if (
+      !ws.current ||
+      ws.current.readyState !==
+      WebSocket.OPEN
+    ) {
+
+      setError(
+        "Servidor ainda não conectado."
       );
+
+      return;
+    }
+
+    send({
+      type:
+        "create-room"
+    });
+  }
+
+  /* =========================================================
+     ENTRAR
+  ========================================================= */
+
+  function joinRoom() {
+
+    setError("");
+
+    const code =
+      roomInput
+        .trim()
+        .toUpperCase();
+
+    if (!code) {
+
+      setError(
+        "Digite o código da sala."
+      );
+
+      return;
+    }
+
+    send({
+      type:
+        "join-room",
+
+      roomId:
+        code
+    });
+  }
+
+  /* =========================================================
+     SAIR
+  ========================================================= */
+
+  function leaveRoom() {
+
+    stopSharing();
+
+    send({
+      type:
+        "leave-room"
+    });
+
+    closeAllPeers();
+
+    setInRoom(
+      false
+    );
+
+    setCurrentRoom(
+      ""
+    );
+
+    setRoomCode(
+      ""
+    );
+
+    roomId.current =
+      "";
+  }
+
+  /* =========================================================
+     CAPTURA
+  ========================================================= */
+
+  async function startSharing() {
+
+    setError("");
+
+    if (
+      !inRoom
+    ) {
+
+      setError(
+        "Entre em uma sala primeiro."
+      );
+
+      return;
+    }
+
+    try {
 
       const stream =
         await navigator.mediaDevices.getDisplayMedia(
@@ -631,94 +782,47 @@ function App() {
         );
 
       console.log(
-        "MediaStream:",
+        "Stream:",
         stream
       );
 
       localStream.current =
         stream;
 
-      /* -------------------------------
-         VIDEO LOCAL
-      -------------------------------- */
-
       if (
         localVideo.current
       ) {
+
         localVideo.current.srcObject =
           stream;
 
-        try {
-          await localVideo.current.play();
-        } catch (error) {
-          console.warn(
-            "Autoplay local bloqueado:",
-            error
+        await localVideo.current
+          .play()
+          .catch(
+            () => {}
           );
-        }
       }
 
-      /* -------------------------------
-         VIDEO TRACK
-      -------------------------------- */
+      const videoTrack =
+        stream.getVideoTracks()[0];
 
-      const videoTracks =
-        stream.getVideoTracks();
-
-      console.log(
-        "VIDEO TRACKS:",
-        videoTracks
-      );
-
-      if (
-        videoTracks.length > 0
-      ) {
-        const videoTrack =
-          videoTracks[0];
-
-        console.log(
-          "VIDEO TRACK:",
-          videoTrack
-        );
-
-        console.log(
-          "TRACK SETTINGS:",
-          videoTrack.getSettings()
-        );
-
-        console.log(
-          "TRACK STATE:",
-          videoTrack.readyState
-        );
+      if (videoTrack) {
 
         videoTrack.addEventListener(
           "ended",
           () => {
-            console.log(
-              "Usuário encerrou a captura."
-            );
-
             stopSharing();
           }
         );
       }
 
-      /* -------------------------------
-         AUDIO TRACK
-      -------------------------------- */
-
-      console.log(
-        "AUDIO TRACKS:",
-        stream.getAudioTracks()
+      setSharing(
+        true
       );
 
-      /* -------------------------------
-         ESTADO
-      -------------------------------- */
-
-      setSharing(true);
-
-      setWatching(false);
+      setWatching(
+        false
+      );
 
       send({
         type:
@@ -729,13 +833,11 @@ function App() {
         "Você está transmitindo"
       );
 
-      console.log(
-        "TRANSMISSÃO INICIADA"
-      );
+    } catch (
+      error
+    ) {
 
-    } catch (error) {
       console.error(
-        "Erro ao iniciar captura:",
         error
       );
 
@@ -747,29 +849,26 @@ function App() {
       }
 
       setError(
-        "Não foi possível iniciar a captura da tela."
+        "Não foi possível iniciar a captura."
       );
     }
   }
 
-  /* ==========================================
-     PARAR TRANSMISSÃO
-  ========================================== */
+  /* =========================================================
+     PARAR
+  ========================================================= */
 
   function stopSharing() {
-    console.log(
-      "Parando transmissão..."
-    );
 
     if (
       localStream.current
     ) {
+
       localStream.current
         .getTracks()
         .forEach(
-          (track) => {
-            track.stop();
-          }
+          track =>
+            track.stop()
         );
     }
 
@@ -779,7 +878,9 @@ function App() {
     if (
       localVideo.current
     ) {
-      localVideo.current.srcObject =
+
+      localVideo.current
+        .srcObject =
         null;
     }
 
@@ -788,32 +889,36 @@ function App() {
     if (
       ws.current &&
       ws.current.readyState ===
-        WebSocket.OPEN
+      WebSocket.OPEN &&
+      roomId.current
     ) {
+
       send({
         type:
           "stop-sharing"
       });
     }
 
-    setSharing(false);
+    setSharing(
+      false
+    );
 
-    setWatching(false);
-
-    setStatus(
-      "Servidor conectado"
+    setWatching(
+      false
     );
   }
 
-  /* ==========================================
-     FECHAR PEERS
-  ========================================== */
+  /* =========================================================
+     PEERS
+  ========================================================= */
 
   function closeAllPeers() {
+
     for (
       const pc of
       peerConnections.current.values()
     ) {
+
       try {
         pc.close();
       } catch {}
@@ -824,64 +929,46 @@ function App() {
     pendingCandidates.current.clear();
   }
 
-  /* ==========================================
-     PEDIR OFFER
-  ========================================== */
+  /* =========================================================
+     REQUEST OFFER
+  ========================================================= */
 
   function requestOffer(
     producerId
   ) {
-    console.log(
-      "Pedindo offer ao produtor:",
-      producerId
-    );
 
     send({
       type:
         "request-offer",
+
       producerId
     });
   }
 
-  /* ==========================================
-     CRIAR PEER DO PRODUTOR
-  ========================================== */
+  /* =========================================================
+     CREATE PEER — PRODUTOR
+  ========================================================= */
 
   async function createPeer(
     viewerId
   ) {
-    console.log(
-      "Criando PeerConnection para viewer:",
-      viewerId
-    );
 
-    /*
-     * Se já existe conexão,
-     * fechamos antes de criar outra.
-     */
-
-    const oldPc =
+    const old =
       peerConnections.current.get(
         viewerId
       );
 
-    if (oldPc) {
-      try {
-        oldPc.close();
-      } catch {}
+    if (old) {
+      old.close();
     }
 
     const iceServers =
       await getIceServers();
 
-    console.log(
-      "ICE Servers do produtor:",
-      iceServers
-    );
-
     const pc =
       new RTCPeerConnection({
         iceServers,
+
         iceTransportPolicy:
           "all"
       });
@@ -891,179 +978,97 @@ function App() {
       pc
     );
 
-    /* -------------------------------
-       DEBUG ICE
-    -------------------------------- */
-
-    pc.oniceconnectionstatechange =
-      () => {
-        console.log(
-          "PRODUTOR ICE:",
-          pc.iceConnectionState
-        );
-      };
-
-    pc.onconnectionstatechange =
-      () => {
-        console.log(
-          "PRODUTOR CONNECTION:",
-          pc.connectionState
-        );
-
-        if (
-          pc.connectionState ===
-          "failed"
-        ) {
-          console.error(
-            "Conexão do produtor falhou."
-          );
-        }
-      };
-
-    pc.onicegatheringstatechange =
-      () => {
-        console.log(
-          "PRODUTOR GATHERING:",
-          pc.iceGatheringState
-        );
-      };
-
-    pc.onsignalingstatechange =
-      () => {
-        console.log(
-          "PRODUTOR SIGNALING:",
-          pc.signalingState
-        );
-      };
-
-    /* -------------------------------
-       ADICIONAR STREAM
-    -------------------------------- */
+    /* TRACKS */
 
     if (
       localStream.current
     ) {
-      const tracks =
-        localStream.current.getTracks();
 
-      console.log(
-        "Adicionando tracks:",
-        tracks
-      );
+      for (
+        const track of
+        localStream.current.getTracks()
+      ) {
 
-      tracks.forEach(
-        (track) => {
-          pc.addTrack(
-            track,
-            localStream.current
-          );
-        }
-      );
+        pc.addTrack(
+          track,
+          localStream.current
+        );
+      }
     }
 
-    /* -------------------------------
-       ICE CANDIDATE
-    -------------------------------- */
+    /* ICE */
 
     pc.onicecandidate =
       ({ candidate }) => {
+
         if (candidate) {
-          console.log(
-            "PRODUTOR ICE candidate:",
-            candidate.candidate
-          );
 
           send({
-            type: "ice",
+            type:
+              "ice",
+
             target:
               viewerId,
+
             candidate
           });
         }
       };
 
-    /* -------------------------------
-       ICE CANDIDATE ERROR
-    -------------------------------- */
+    pc.onconnectionstatechange =
+      () => {
 
-    pc.onicecandidateerror =
-      (event) => {
-        console.warn(
-          "PRODUTOR ICE candidate error:",
-          event
+        console.log(
+          "PRODUTOR:",
+          pc.connectionState
         );
       };
 
-    /* -------------------------------
-       OFFER
-    -------------------------------- */
+    /* OFFER */
 
     const offer =
       await pc.createOffer();
-
-    console.log(
-      "Offer criada:",
-      offer
-    );
 
     await pc.setLocalDescription(
       offer
     );
 
-    console.log(
-      "LocalDescription configurada."
-    );
-
     send({
-      type: "offer",
+      type:
+        "offer",
+
       target:
         viewerId,
+
       offer:
         pc.localDescription
     });
-
-    console.log(
-      "Offer enviada para:",
-      viewerId
-    );
-
-    return pc;
   }
 
-  /* ==========================================
+  /* =========================================================
      HANDLE OFFER — VIEWER
-  ========================================== */
+  ========================================================= */
 
   async function handleOffer(
     msg
   ) {
-    console.log(
-      "Offer recebida:",
-      msg
-    );
 
-    const oldPc =
+    const old =
       peerConnections.current.get(
         msg.from
       );
 
-    if (oldPc) {
-      try {
-        oldPc.close();
-      } catch {}
+    if (old) {
+      old.close();
     }
 
     const iceServers =
       await getIceServers();
 
-    console.log(
-      "ICE Servers do viewer:",
-      iceServers
-    );
-
     const pc =
       new RTCPeerConnection({
         iceServers,
+
         iceTransportPolicy:
           "all"
       });
@@ -1073,22 +1078,63 @@ function App() {
       pc
     );
 
-    /* -------------------------------
-       DEBUG ICE
-    -------------------------------- */
+    /* TRACK */
 
-    pc.oniceconnectionstatechange =
-      () => {
-        console.log(
-          "VIEWER ICE:",
-          pc.iceConnectionState
+    pc.ontrack =
+      ({ streams }) => {
+
+        const stream =
+          streams?.[0];
+
+        if (
+          !stream
+        ) {
+          return;
+        }
+
+        if (
+          remoteVideo.current
+        ) {
+
+          remoteVideo.current.srcObject =
+            stream;
+
+          remoteVideo.current
+            .play()
+            .catch(
+              () => {}
+            );
+        }
+
+        setWatching(
+          true
         );
+      };
+
+    /* ICE */
+
+    pc.onicecandidate =
+      ({ candidate }) => {
+
+        if (candidate) {
+
+          send({
+            type:
+              "ice",
+
+            target:
+              msg.from,
+
+            candidate
+          });
+        }
       };
 
     pc.onconnectionstatechange =
       () => {
+
         console.log(
-          "VIEWER CONNECTION:",
+          "VIEWER:",
           pc.connectionState
         );
 
@@ -1096,17 +1142,6 @@ function App() {
           pc.connectionState ===
           "connected"
         ) {
-          console.log(
-            "================================"
-          );
-
-          console.log(
-            "WEBRTC CONECTADO!"
-          );
-
-          console.log(
-            "================================"
-          );
 
           setWatching(
             true
@@ -1117,9 +1152,6 @@ function App() {
           pc.connectionState ===
           "failed"
         ) {
-          console.error(
-            "Viewer connection: failed"
-          );
 
           setError(
             "A conexão WebRTC falhou."
@@ -1127,234 +1159,61 @@ function App() {
         }
       };
 
-    pc.onicegatheringstatechange =
-      () => {
-        console.log(
-          "VIEWER GATHERING:",
-          pc.iceGatheringState
-        );
-      };
+    /* REMOTE */
 
-    pc.onsignalingstatechange =
-      () => {
-        console.log(
-          "VIEWER SIGNALING:",
-          pc.signalingState
-        );
-      };
+    await pc.setRemoteDescription(
+      msg.offer
+    );
 
-    /* -------------------------------
-       TRACK
-    -------------------------------- */
+    await flushPendingCandidates(
+      msg.from
+    );
 
-    pc.ontrack =
-      ({
-        streams
-      }) => {
-        console.log(
-          "TRACK RECEBIDA:",
-          streams
-        );
+    /* ANSWER */
 
-        const stream =
-          streams?.[0];
+    const answer =
+      await pc.createAnswer();
 
-        if (
-          !stream
-        ) {
-          console.warn(
-            "Track recebida sem MediaStream."
-          );
+    await pc.setLocalDescription(
+      answer
+    );
 
-          return;
-        }
+    send({
+      type:
+        "answer",
 
-        if (
-          remoteVideo.current
-        ) {
-          remoteVideo.current.srcObject =
-            stream;
+      target:
+        msg.from,
 
-          remoteVideo.current
-            .play()
-            .then(() => {
-              console.log(
-                "Vídeo remoto reproduzindo."
-              );
-            })
-            .catch(
-              (error) => {
-                console.warn(
-                  "Autoplay remoto bloqueado:",
-                  error
-                );
-              }
-            );
-        }
-
-        setWatching(
-          true
-        );
-      };
-
-    /* -------------------------------
-       ICE
-    -------------------------------- */
-
-    pc.onicecandidate =
-      ({ candidate }) => {
-        if (candidate) {
-          console.log(
-            "VIEWER ICE candidate:",
-            candidate.candidate
-          );
-
-          send({
-            type: "ice",
-            target:
-              msg.from,
-            candidate
-          });
-        }
-      };
-
-    pc.onicecandidateerror =
-      (event) => {
-        console.warn(
-          "VIEWER ICE candidate error:",
-          event
-        );
-      };
-
-    /* -------------------------------
-       REMOTE DESCRIPTION
-    -------------------------------- */
-
-    try {
-      await pc.setRemoteDescription(
-        msg.offer
-      );
-
-      console.log(
-        "RemoteDescription configurada."
-      );
-
-      await flushPendingCandidates(
-        msg.from
-      );
-
-    } catch (error) {
-      console.error(
-        "Erro setRemoteDescription:",
-        error
-      );
-
-      return;
-    }
-
-    /* -------------------------------
-       ANSWER
-    -------------------------------- */
-
-    try {
-      const answer =
-        await pc.createAnswer();
-
-      console.log(
-        "Answer criada:",
-        answer
-      );
-
-      await pc.setLocalDescription(
-        answer
-      );
-
-      console.log(
-        "LocalDescription da answer configurada."
-      );
-
-      send({
-        type: "answer",
-        target:
-          msg.from,
-        answer:
-          pc.localDescription
-      });
-
-      console.log(
-        "Answer enviada."
-      );
-
-    } catch (error) {
-      console.error(
-        "Erro criando answer:",
-        error
-      );
-    }
+      answer:
+        pc.localDescription
+    });
   }
 
-  /* ==========================================
-     ICE CANDIDATE
-  ========================================== */
+  /* =========================================================
+     ICE
+  ========================================================= */
 
   async function handleIceCandidate(
     msg
   ) {
+
     const pc =
       peerConnections.current.get(
         msg.from
       );
 
     if (
-      !pc
-    ) {
-      console.warn(
-        "Peer ainda não existe para ICE:",
-        msg.from
-      );
-
-      /*
-       * Guarda o candidate até a
-       * PeerConnection existir.
-       */
-
-      if (
-        !pendingCandidates.current.has(
-          msg.from
-        )
-      ) {
-        pendingCandidates.current.set(
-          msg.from,
-          []
-        );
-      }
-
-      pendingCandidates.current
-        .get(msg.from)
-        .push(
-          msg.candidate
-        );
-
-      return;
-    }
-
-    /*
-     * Não adiciona ICE antes de
-     * setRemoteDescription.
-     */
-
-    if (
+      !pc ||
       !pc.remoteDescription
     ) {
-      console.log(
-        "Guardando ICE até remoteDescription."
-      );
 
       if (
         !pendingCandidates.current.has(
           msg.from
         )
       ) {
+
         pendingCandidates.current.set(
           msg.from,
           []
@@ -1371,29 +1230,30 @@ function App() {
     }
 
     try {
+
       await pc.addIceCandidate(
         msg.candidate
       );
 
-      console.log(
-        "ICE candidate adicionado."
-      );
+    } catch (
+      error
+    ) {
 
-    } catch (error) {
       console.warn(
-        "Erro addIceCandidate:",
+        "ICE:",
         error
       );
     }
   }
 
-  /* ==========================================
-     PROCESSAR ICE PENDENTE
-  ========================================== */
+  /* =========================================================
+     FLUSH ICE
+  ========================================================= */
 
   async function flushPendingCandidates(
     peerId
   ) {
+
     const pc =
       peerConnections.current.get(
         peerId
@@ -1412,29 +1272,23 @@ function App() {
       );
 
     if (
-      !candidates ||
-      candidates.length === 0
+      !candidates
     ) {
       return;
     }
 
-    console.log(
-      `Processando ${candidates.length} ICE candidates pendentes.`
-    );
-
     for (
-      const candidate of candidates
+      const candidate of
+      candidates
     ) {
+
       try {
+
         await pc.addIceCandidate(
           candidate
         );
-      } catch (error) {
-        console.warn(
-          "Erro ICE pendente:",
-          error
-        );
-      }
+
+      } catch {}
     }
 
     pendingCandidates.current.delete(
@@ -1442,11 +1296,12 @@ function App() {
     );
   }
 
-  /* ==========================================
+  /* =========================================================
      UI
-  ========================================== */
+  ========================================================= */
 
   return (
+
     <main className="app">
 
       <header className="topbar">
@@ -1481,148 +1336,63 @@ function App() {
 
       </header>
 
-      <section className="stage">
+      {!inRoom ? (
 
-        <div className="video-card">
-
-          {watching ? (
-
-            <video
-              ref={
-                remoteVideo
-              }
-              autoPlay
-              playsInline
-              controls
-              style={{
-                width:
-                  "100%",
-                height:
-                  "100%",
-                objectFit:
-                  "contain"
-              }}
-            />
-
-          ) : sharing ? (
-
-            <video
-              ref={
-                localVideo
-              }
-              autoPlay
-              muted
-              playsInline
-              style={{
-                width:
-                  "100%",
-                height:
-                  "100%",
-                objectFit:
-                  "contain"
-              }}
-            />
-
-          ) : (
-
-            <div className="empty">
-
-              <div className="screen-icon">
-                ▣
-              </div>
-
-              <h2>
-                Nenhuma transmissão
-              </h2>
-
-              <p>
-                Inicie uma transmissão
-                para que as pessoas
-                da Activity possam
-                assistir.
-              </p>
-
-            </div>
-
-          )}
-
-          <div className="live-badge">
-
-            {sharing
-              ? "● AO VIVO"
-              : watching
-                ? "● ASSISTINDO"
-                : "○ OFFLINE"}
-
-          </div>
-
-        </div>
-
-        <aside className="panel">
+        <section className="room-menu">
 
           <h2>
-            ScreenCast
+            Salas
           </h2>
 
           <p className="muted">
-            Compartilhe sua tela
-            com as pessoas desta
-            sala.
+            Crie uma sala ou entre
+            usando um código.
           </p>
 
-          {!sharing ? (
+          <button
+            className="primary"
+            onClick={
+              createRoom
+            }
+          >
+            ➕ Criar sala
+          </button>
+
+          <div className="join-box">
+
+            <input
+              value={
+                roomInput
+              }
+              onChange={
+                event =>
+                  setRoomInput(
+                    event.target.value
+                  )
+              }
+              onKeyDown={
+                event => {
+
+                  if (
+                    event.key ===
+                    "Enter"
+                  ) {
+
+                    joinRoom();
+                  }
+                }
+              }
+              placeholder="Código da sala"
+              maxLength={6}
+            />
 
             <button
-              className="primary"
               onClick={
-                startSharing
+                joinRoom
               }
             >
-              🖥️ Compartilhar tela
+              Entrar
             </button>
-
-          ) : (
-
-            <button
-              className="danger"
-              onClick={
-                stopSharing
-              }
-            >
-              ■ Parar transmissão
-            </button>
-
-          )}
-
-          <div className="stats">
-
-            <div>
-
-              <strong>
-                {viewerCount}
-              </strong>
-
-              <span>
-                pessoas na sala
-              </span>
-
-            </div>
-
-            <div>
-
-              <strong>
-                {sharing
-                  ? "Você"
-                  : watching
-                    ? "Ao vivo"
-                    : "—"}
-              </strong>
-
-              <span>
-                transmissão
-              </span>
-
-            </div>
 
           </div>
 
@@ -1634,39 +1404,208 @@ function App() {
 
           )}
 
-          <small>
-            A captura começa
-            somente depois que
-            você escolher uma tela,
-            janela ou aba.
-          </small>
+        </section>
 
-        </aside>
+      ) : (
 
-      </section>
+        <>
+
+          <section className="room-bar">
+
+            <div>
+
+              <span>
+                SALA
+              </span>
+
+              <strong>
+                {currentRoom}
+              </strong>
+
+            </div>
+
+            <button
+              onClick={
+                leaveRoom
+              }
+            >
+              Sair da sala
+            </button>
+
+          </section>
+
+          <section className="stage">
+
+            <div className="video-card">
+
+              {watching ? (
+
+                <video
+                  ref={
+                    remoteVideo
+                  }
+                  autoPlay
+                  playsInline
+                  controls
+                />
+
+              ) : sharing ? (
+
+                <video
+                  ref={
+                    localVideo
+                  }
+                  autoPlay
+                  muted
+                  playsInline
+                />
+
+              ) : (
+
+                <div className="empty">
+
+                  <div className="screen-icon">
+                    ▣
+                  </div>
+
+                  <h2>
+                    Nenhuma transmissão
+                  </h2>
+
+                  <p>
+                    Alguém desta sala
+                    precisa iniciar
+                    uma transmissão.
+                  </p>
+
+                </div>
+
+              )}
+
+              <div className="live-badge">
+
+                {sharing
+                  ? "● AO VIVO"
+                  : watching
+                    ? "● ASSISTINDO"
+                    : "○ OFFLINE"}
+
+              </div>
+
+            </div>
+
+            <aside className="panel">
+
+              <h2>
+                ScreenCast
+              </h2>
+
+              <p className="muted">
+                Compartilhe sua tela
+                com as pessoas desta
+                sala.
+              </p>
+
+              {!sharing ? (
+
+                <button
+                  className="primary"
+                  onClick={
+                    startSharing
+                  }
+                >
+                  🖥️ Compartilhar tela
+                </button>
+
+              ) : (
+
+                <button
+                  className="danger"
+                  onClick={
+                    stopSharing
+                  }
+                >
+                  ■ Parar transmissão
+                </button>
+
+              )}
+
+              <div className="stats">
+
+                <div>
+
+                  <strong>
+                    {viewerCount}
+                  </strong>
+
+                  <span>
+                    espectadores
+                  </span>
+
+                </div>
+
+                <div>
+
+                  <strong>
+                    {sharing
+                      ? "Você"
+                      : watching
+                        ? "Ao vivo"
+                        : "—"}
+                  </strong>
+
+                  <span>
+                    transmissão
+                  </span>
+
+                </div>
+
+              </div>
+
+              {error && (
+
+                <div className="error">
+                  {error}
+                </div>
+
+              )}
+
+              <small>
+                Código da sala:
+                {" "}
+                <b>
+                  {currentRoom}
+                </b>
+              </small>
+
+            </aside>
+
+          </section>
+
+        </>
+
+      )}
 
     </main>
   );
 }
 
-/* ==========================================
-   START REACT
-========================================== */
+/* =========================================================
+   START
+========================================================= */
 
-const rootElement =
+const root =
   document.getElementById(
     "root"
   );
 
-if (!rootElement) {
+if (!root) {
+
   throw new Error(
     "Elemento #root não encontrado."
   );
 }
 
-createRoot(
-  rootElement
-).render(
+createRoot(root).render(
   <App />
 );
-
