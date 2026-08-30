@@ -37,17 +37,14 @@ let discordSdk = null;
 ========================================================= */
 
 async function getIceServers() {
-
   try {
-
-    const response =
-      await fetch(
-        `${TURN_SERVER_URL}/turn-credentials`,
-        {
-          method: "GET",
-          cache: "no-store"
-        }
-      );
+    const response = await fetch(
+      `${TURN_SERVER_URL}/turn-credentials`,
+      {
+        method: "GET",
+        cache: "no-store"
+      }
+    );
 
     if (!response.ok) {
       throw new Error(
@@ -75,7 +72,6 @@ async function getIceServers() {
     return data.iceServers;
 
   } catch (error) {
-
     console.warn(
       "[TURN] Indisponível:",
       error
@@ -97,7 +93,6 @@ async function getIceServers() {
 ========================================================= */
 
 function App() {
-
   const [
     discordReady,
     setDiscordReady
@@ -181,15 +176,6 @@ function App() {
     useRef(new Map());
 
   /*
-   * producerId -> Set<HTMLVideoElement>
-   *
-   * Evita reanexar a mesma stream
-   * várias vezes.
-   */
-  const attachedStreams =
-    useRef(new WeakMap());
-
-  /*
    * local->viewer
    * producer->local
    */
@@ -198,12 +184,16 @@ function App() {
 
   /*
    * peerKey -> ICE[]
+   *
+   * IMPORTANTE:
+   * Cada conexão possui sua própria fila.
    */
   const pendingCandidates =
     useRef(new Map());
 
   /*
-   * produtores já solicitados
+   * Produtores que já receberam
+   * request-offer.
    */
   const requestedOffers =
     useRef(new Set());
@@ -214,203 +204,14 @@ function App() {
   const myId =
     useRef("");
 
-  /* =========================================================
+  /* =======================================================
      VIDEO
-========================================================= */
-
-  function playVideoSafely(video) {
-
-    if (!video) {
-      return;
-    }
-
-    /*
-     * Não chama play enquanto o elemento
-     * ainda está carregando outra coisa.
-     */
-    if (
-      video.readyState <
-      HTMLMediaElement.HAVE_METADATA
-    ) {
-
-      return;
-    }
-
-    const promise =
-      video.play();
-
-    if (
-      promise &&
-      typeof promise.catch ===
-        "function"
-    ) {
-
-      promise.catch(error => {
-
-        /*
-         * AbortError normalmente significa
-         * que o srcObject mudou durante o play.
-         * Não é necessário ficar tentando
-         * infinitamente.
-         */
-        if (
-          error?.name ===
-          "AbortError"
-        ) {
-
-          return;
-        }
-
-        console.warn(
-          "[VIDEO] play:",
-          error
-        );
-      });
-    }
-  }
-
-  function attachStreamToVideo(
-    producerId,
-    video,
-    stream
-  ) {
-
-    if (
-      !video ||
-      !stream
-    ) {
-      return;
-    }
-
-    /*
-     * Se o elemento já possui exatamente
-     * essa stream, não mexe nele.
-     */
-    if (
-      video.srcObject ===
-      stream
-    ) {
-
-      /*
-       * Se já carregou, apenas garante
-       * que está tocando.
-       */
-      if (
-        video.readyState >=
-        HTMLMediaElement.HAVE_METADATA
-      ) {
-
-        playVideoSafely(
-          video
-        );
-      }
-
-      return;
-    }
-
-    console.log(
-      "[VIDEO] anexando stream:",
-      producerId
-    );
-
-    /*
-     * Primeiro configura o elemento.
-     */
-    video.autoplay =
-      true;
-
-    video.playsInline =
-      true;
-
-    video.setAttribute(
-      "playsinline",
-      ""
-    );
-
-    if (
-      producerId ===
-      "local"
-    ) {
-
-      video.muted =
-        true;
-
-    } else {
-
-      video.muted =
-        !(
-          audioStates[
-            producerId
-          ] ?? false
-        );
-    }
-
-    video.volume =
-      1;
-
-    /*
-     * Marca a stream atual.
-     */
-    attachedStreams.current.set(
-      video,
-      stream
-    );
-
-    /*
-     * Só agora atribui srcObject.
-     */
-    video.srcObject =
-      stream;
-
-    /*
-     * O evento loadedmetadata garante
-     * que o navegador terminou de
-     * preparar o vídeo antes do play.
-     */
-    const onLoadedMetadata =
-      () => {
-
-        console.log(
-          "[VIDEO] metadata carregada:",
-          producerId,
-          video.videoWidth,
-          "x",
-          video.videoHeight
-        );
-
-        playVideoSafely(
-          video
-        );
-      };
-
-    video.addEventListener(
-      "loadedmetadata",
-      onLoadedMetadata,
-      {
-        once: true
-      }
-    );
-
-    /*
-     * Alguns navegadores podem já ter
-     * metadata disponível.
-     */
-    if (
-      video.readyState >=
-      HTMLMediaElement.HAVE_METADATA
-    ) {
-
-      playVideoSafely(
-        video
-      );
-    }
-  }
+  ======================================================= */
 
   function registerVideo(
     producerId,
     element
   ) {
-
     if (!element) {
       return;
     }
@@ -421,7 +222,6 @@ function App() {
       );
 
     if (!set) {
-
       set =
         new Set();
 
@@ -433,27 +233,14 @@ function App() {
 
     set.add(element);
 
-    element.autoplay =
-      true;
-
-    element.playsInline =
-      true;
-
-    element.setAttribute(
-      "playsinline",
-      ""
-    );
+    element.autoplay = true;
+    element.playsInline = true;
 
     if (
-      producerId ===
-      "local"
+      producerId === "local"
     ) {
-
-      element.muted =
-        true;
-
+      element.muted = true;
     } else {
-
       element.muted =
         !(
           audioStates[
@@ -462,21 +249,60 @@ function App() {
         );
     }
 
-    element.volume =
-      1;
+    element.volume = 1;
 
     const stream =
       streams.current.get(
         producerId
       );
 
-    if (stream) {
+    if (!stream) {
+      return;
+    }
 
-      attachStreamToVideo(
-        producerId,
-        element,
+    if (
+      element.srcObject !==
+      stream
+    ) {
+      element.srcObject =
+        stream;
+    }
+
+    /*
+     * Espera o browser receber metadata
+     * antes de tentar tocar.
+     */
+    const tryPlay = () => {
+      if (
+        element.srcObject !==
         stream
-      );
+      ) {
+        return;
+      }
+
+      element.play()
+        .catch(error => {
+          if (
+            error?.name !==
+              "AbortError" &&
+            error?.name !==
+              "NotAllowedError"
+          ) {
+            console.warn(
+              "[VIDEO] play:",
+              error
+            );
+          }
+        });
+    };
+
+    if (
+      element.readyState >= 2
+    ) {
+      tryPlay();
+    } else {
+      element.onloadedmetadata =
+        tryPlay;
     }
   }
 
@@ -484,7 +310,6 @@ function App() {
     producerId,
     element
   ) {
-
     if (!element) {
       return;
     }
@@ -498,14 +323,9 @@ function App() {
       return;
     }
 
-    set.delete(
-      element
-    );
+    set.delete(element);
 
-    if (
-      set.size === 0
-    ) {
-
+    if (set.size === 0) {
       videoRefs.current.delete(
         producerId
       );
@@ -516,7 +336,6 @@ function App() {
     producerId,
     stream
   ) {
-
     if (!stream) {
       return;
     }
@@ -524,10 +343,12 @@ function App() {
     console.log(
       "[VIDEO] attachStream:",
       producerId,
-      stream.getTracks().map(
-        track =>
-          `${track.kind}:${track.readyState}`
-      )
+      stream
+        .getTracks()
+        .map(
+          track =>
+            `${track.kind}:${track.readyState}`
+        )
     );
 
     streams.current.set(
@@ -548,19 +369,91 @@ function App() {
       const video
       of videos
     ) {
+      if (!video) {
+        continue;
+      }
 
-      attachStreamToVideo(
-        producerId,
-        video,
-        stream
+      console.log(
+        "[VIDEO] anexando stream:",
+        producerId
       );
+
+      if (
+        video.srcObject !==
+        stream
+      ) {
+        video.srcObject =
+          stream;
+      }
+
+      video.autoplay = true;
+      video.playsInline = true;
+
+      if (
+        producerId === "local"
+      ) {
+        video.muted = true;
+      } else {
+        video.muted =
+          !(
+            audioStates[
+              producerId
+            ] ?? false
+          );
+      }
+
+      video.volume = 1;
+
+      video.onloadedmetadata =
+        () => {
+          console.log(
+            "[VIDEO] metadata carregada:",
+            producerId,
+            video.videoWidth,
+            "x",
+            video.videoHeight
+          );
+
+          video.play()
+            .catch(error => {
+              if (
+                error?.name !==
+                  "AbortError" &&
+                error?.name !==
+                  "NotAllowedError"
+              ) {
+                console.warn(
+                  "[VIDEO] play:",
+                  error
+                );
+              }
+            });
+        };
+
+      if (
+        video.readyState >= 2
+      ) {
+        video.play()
+          .catch(error => {
+            if (
+              error?.name !==
+                "AbortError" &&
+              error?.name !==
+                "NotAllowedError"
+            ) {
+              console.warn(
+                "[VIDEO] play:",
+                error
+              );
+            }
+          });
+      }
     }
   }
 
   function clearVideo(
     producerId
   ) {
-
     const videos =
       videoRefs.current.get(
         producerId
@@ -574,34 +467,23 @@ function App() {
       const video
       of videos
     ) {
-
       try {
-
         video.pause();
-
         video.srcObject =
           null;
-
-        attachedStreams.current.delete(
-          video
-        );
-
       } catch {}
     }
   }
 
-  /* =========================================================
+  /* =======================================================
      DISCORD
-========================================================= */
+  ======================================================= */
 
   useEffect(() => {
-
     let alive = true;
 
     async function setup() {
-
       if (!CLIENT_ID) {
-
         setStatus(
           "Modo navegador"
         );
@@ -612,7 +494,6 @@ function App() {
       }
 
       try {
-
         discordSdk =
           new DiscordSDK(
             CLIENT_ID
@@ -624,16 +505,13 @@ function App() {
           return;
         }
 
-        setDiscordReady(
-          true
-        );
+        setDiscordReady(true);
 
         setStatus(
           "Conectado ao Discord"
         );
 
       } catch (error) {
-
         console.warn(
           "[DISCORD]",
           error
@@ -650,27 +528,23 @@ function App() {
     setup();
 
     return () => {
-
       alive = false;
 
       cleanupAll();
 
       if (ws.current) {
-
         try {
           ws.current.close();
         } catch {}
       }
     };
-
   }, []);
 
-  /* =========================================================
+  /* =======================================================
      WEBSOCKET
-========================================================= */
+  ======================================================= */
 
   function connectSignal() {
-
     if (
       ws.current &&
       (
@@ -680,7 +554,6 @@ function App() {
           WebSocket.CONNECTING
       )
     ) {
-
       return;
     }
 
@@ -690,7 +563,6 @@ function App() {
     );
 
     try {
-
       const socket =
         new WebSocket(
           SIGNALING_URL
@@ -700,7 +572,6 @@ function App() {
         socket;
 
       socket.onopen = () => {
-
         console.log(
           "[WS] Conectado"
         );
@@ -714,18 +585,14 @@ function App() {
 
       socket.onmessage =
         async event => {
-
           let msg;
 
           try {
-
             msg =
               JSON.parse(
                 event.data
               );
-
           } catch {
-
             console.error(
               "[WS] JSON inválido"
             );
@@ -746,7 +613,6 @@ function App() {
             msg.type ===
             "client-id"
           ) {
-
             myId.current =
               String(
                 msg.id || ""
@@ -768,7 +634,6 @@ function App() {
             msg.type ===
             "room-created"
           ) {
-
             const code =
               String(
                 msg.roomId || ""
@@ -779,23 +644,13 @@ function App() {
             roomId.current =
               code;
 
-            setRoomCode(
-              code
-            );
-
-            setCurrentRoom(
-              code
-            );
-
-            setInRoom(
-              true
-            );
+            setRoomCode(code);
+            setCurrentRoom(code);
+            setInRoom(true);
 
             requestedOffers.current.clear();
 
-            setProducers(
-              []
-            );
+            setProducers([]);
 
             setSelectedProducer(
               "local"
@@ -818,7 +673,6 @@ function App() {
             msg.type ===
             "room-joined"
           ) {
-
             const code =
               String(
                 msg.roomId || ""
@@ -829,23 +683,13 @@ function App() {
             roomId.current =
               code;
 
-            setRoomCode(
-              code
-            );
-
-            setCurrentRoom(
-              code
-            );
-
-            setInRoom(
-              true
-            );
+            setRoomCode(code);
+            setCurrentRoom(code);
+            setInRoom(true);
 
             requestedOffers.current.clear();
 
-            setProducers(
-              []
-            );
+            setProducers([]);
 
             setSelectedProducer(
               "local"
@@ -868,7 +712,6 @@ function App() {
             msg.type ===
             "producer-list"
           ) {
-
             const list =
               Array.isArray(
                 msg.producers
@@ -886,7 +729,7 @@ function App() {
                   id =>
                     id &&
                     id !==
-                    myId.current
+                      myId.current
                 )
                 .slice(
                   0,
@@ -904,12 +747,10 @@ function App() {
 
             setSelectedProducer(
               current => {
-
                 if (
                   current ===
                   "local"
                 ) {
-
                   return current;
                 }
 
@@ -918,7 +759,6 @@ function App() {
                     current
                   )
                 ) {
-
                   return current;
                 }
 
@@ -933,7 +773,6 @@ function App() {
               const producerId
               of remote
             ) {
-
               requestOffer(
                 producerId
               );
@@ -950,7 +789,6 @@ function App() {
             msg.type ===
             "producer"
           ) {
-
             const producerId =
               String(
                 msg.producerId || ""
@@ -969,13 +807,11 @@ function App() {
 
             setProducers(
               current => {
-
                 if (
                   current.includes(
                     producerId
                   )
                 ) {
-
                   return current;
                 }
 
@@ -983,7 +819,6 @@ function App() {
                   current.length >=
                   MAX_PRODUCERS
                 ) {
-
                   return current;
                 }
 
@@ -1009,7 +844,6 @@ function App() {
             msg.type ===
             "producer-left"
           ) {
-
             removeRemoteProducer(
               String(
                 msg.producerId || ""
@@ -1027,7 +861,6 @@ function App() {
             msg.type ===
             "viewer-count"
           ) {
-
             setViewerCount(
               Number(
                 msg.count || 0
@@ -1045,7 +878,6 @@ function App() {
             msg.type ===
             "error"
           ) {
-
             console.error(
               "[SERVER ERROR]",
               msg.message
@@ -1067,11 +899,9 @@ function App() {
             msg.type ===
             "request-offer"
           ) {
-
             if (
               localStream.current
             ) {
-
               await createProducerPeer(
                 String(
                   msg.viewerId || ""
@@ -1090,7 +920,6 @@ function App() {
             msg.type ===
             "offer"
           ) {
-
             await handleOffer(
               msg
             );
@@ -1106,7 +935,6 @@ function App() {
             msg.type ===
             "answer"
           ) {
-
             await handleAnswer(
               msg
             );
@@ -1122,7 +950,6 @@ function App() {
             msg.type ===
             "ice"
           ) {
-
             await handleIce(
               msg
             );
@@ -1133,7 +960,6 @@ function App() {
 
       socket.onerror =
         error => {
-
           console.error(
             "[WS ERROR]",
             error
@@ -1146,7 +972,6 @@ function App() {
 
       socket.onclose =
         () => {
-
           console.warn(
             "[WS] Fechado"
           );
@@ -1157,7 +982,6 @@ function App() {
         };
 
     } catch (error) {
-
       console.error(
         "[WS]",
         error
@@ -1169,18 +993,16 @@ function App() {
     }
   }
 
-  /* =========================================================
+  /* =======================================================
      SEND
-  ========================================================= */
+  ======================================================= */
 
   function send(message) {
-
     if (
       !ws.current ||
       ws.current.readyState !==
         WebSocket.OPEN
     ) {
-
       console.warn(
         "[SEND] WebSocket não conectado",
         message
@@ -1197,7 +1019,6 @@ function App() {
       !payload.roomId &&
       roomId.current
     ) {
-
       payload.roomId =
         roomId.current;
     }
@@ -1216,12 +1037,11 @@ function App() {
     return true;
   }
 
-  /* =========================================================
+  /* =======================================================
      CREATE ROOM
-  ========================================================= */
+  ======================================================= */
 
   function createRoom() {
-
     setError("");
 
     send({
@@ -1230,12 +1050,11 @@ function App() {
     });
   }
 
-  /* =========================================================
+  /* =======================================================
      JOIN ROOM
-  ========================================================= */
+  ======================================================= */
 
   function joinRoom() {
-
     setError("");
 
     const code =
@@ -1244,7 +1063,6 @@ function App() {
         .toUpperCase();
 
     if (!code) {
-
       setError(
         "Digite o código da sala."
       );
@@ -1261,12 +1079,11 @@ function App() {
     });
   }
 
-  /* =========================================================
+  /* =======================================================
      LEAVE
-  ========================================================= */
+  ======================================================= */
 
   function leaveRoom() {
-
     send({
       type:
         "leave-room"
@@ -1278,44 +1095,28 @@ function App() {
       "";
 
     setRoomCode("");
-
     setCurrentRoom("");
-
-    setInRoom(
-      false
-    );
-
-    setSharing(
-      false
-    );
-
-    setProducers(
-      []
-    );
-
+    setInRoom(false);
+    setSharing(false);
+    setProducers([]);
     setSelectedProducer(
       "local"
     );
-
-    setViewerCount(
-      0
-    );
+    setViewerCount(0);
 
     setStatus(
       "Servidor conectado"
     );
   }
 
-  /* =========================================================
+  /* =======================================================
      START SHARING
-  ========================================================= */
+  ======================================================= */
 
   async function startSharing() {
-
     setError("");
 
     if (!inRoom) {
-
       setError(
         "Entre em uma sala primeiro."
       );
@@ -1331,7 +1132,6 @@ function App() {
       producers.length >=
       MAX_PRODUCERS
     ) {
-
       setError(
         `A sala já possui ${MAX_PRODUCERS} transmissões ativas.`
       );
@@ -1340,7 +1140,6 @@ function App() {
     }
 
     try {
-
       console.log(
         "[SCREEN] solicitando captura..."
       );
@@ -1386,9 +1185,7 @@ function App() {
         })
       );
 
-      setSharing(
-        true
-      );
+      setSharing(true);
 
       setSelectedProducer(
         "local"
@@ -1401,7 +1198,6 @@ function App() {
         });
 
       if (!sent) {
-
         stream
           .getTracks()
           .forEach(
@@ -1416,9 +1212,7 @@ function App() {
           "local"
         );
 
-        setSharing(
-          false
-        );
+        setSharing(false);
 
         setError(
           "Servidor de sinalização não está conectado."
@@ -1435,10 +1229,8 @@ function App() {
         stream.getVideoTracks()[0];
 
       if (videoTrack) {
-
         videoTrack.onended =
           () => {
-
             console.log(
               "[SCREEN] captura encerrada pelo navegador"
             );
@@ -1457,17 +1249,12 @@ function App() {
         stream.getAudioTracks().length
       );
 
-      /*
-       * O React vai montar os vídeos
-       * e registerVideo irá anexar a stream.
-       */
       attachStream(
         "local",
         stream
       );
 
     } catch (error) {
-
       console.error(
         "[SCREEN] erro:",
         error
@@ -1477,7 +1264,6 @@ function App() {
         error?.name ===
         "NotAllowedError"
       ) {
-
         return;
       }
 
@@ -1487,17 +1273,15 @@ function App() {
     }
   }
 
-  /* =========================================================
+  /* =======================================================
      STOP SHARING
-  ========================================================= */
+  ======================================================= */
 
   function stopSharing() {
-
     if (
       !localStream.current &&
       !sharing
     ) {
-
       return;
     }
 
@@ -1511,7 +1295,6 @@ function App() {
         WebSocket.OPEN &&
       roomId.current
     ) {
-
       send({
         type:
           "stop-sharing"
@@ -1525,13 +1308,11 @@ function App() {
       ]
       of peerConnections.current
     ) {
-
       if (
         key.startsWith(
           "local->"
         )
       ) {
-
         try {
           pc.close();
         } catch {}
@@ -1549,12 +1330,10 @@ function App() {
     if (
       localStream.current
     ) {
-
       localStream.current
         .getTracks()
         .forEach(
           track => {
-
             try {
               track.stop();
             } catch {}
@@ -1573,13 +1352,10 @@ function App() {
       "local"
     );
 
-    setSharing(
-      false
-    );
+    setSharing(false);
 
     setAudioStates(
       current => {
-
         const next = {
           ...current
         };
@@ -1592,12 +1368,10 @@ function App() {
 
     setSelectedProducer(
       current => {
-
         if (
           current ===
           "local"
         ) {
-
           return (
             producers[0] ||
             "local"
@@ -1613,14 +1387,13 @@ function App() {
     );
   }
 
-  /* =========================================================
+  /* =======================================================
      REQUEST OFFER
-  ========================================================= */
+  ======================================================= */
 
   function requestOffer(
     producerId
   ) {
-
     if (!producerId) {
       return;
     }
@@ -1629,7 +1402,6 @@ function App() {
       producerId ===
       myId.current
     ) {
-
       return;
     }
 
@@ -1638,7 +1410,6 @@ function App() {
         producerId
       )
     ) {
-
       return;
     }
 
@@ -1659,19 +1430,17 @@ function App() {
     });
   }
 
-  /* =========================================================
+  /* =======================================================
      CREATE PRODUCER PEER
-  ========================================================= */
+  ======================================================= */
 
   async function createProducerPeer(
     viewerId
   ) {
-
     if (
       !viewerId ||
       !localStream.current
     ) {
-
       return;
     }
 
@@ -1684,12 +1453,10 @@ function App() {
       );
 
     if (old) {
-
       if (
         old.signalingState !==
         "closed"
       ) {
-
         console.log(
           "[PRODUCER] peer já existe:",
           key
@@ -1721,11 +1488,15 @@ function App() {
       pc
     );
 
+    pendingCandidates.current.set(
+      key,
+      []
+    );
+
     for (
       const track
       of localStream.current.getTracks()
     ) {
-
       pc.addTrack(
         track,
         localStream.current
@@ -1734,10 +1505,14 @@ function App() {
 
     pc.onicecandidate =
       event => {
-
         if (!event.candidate) {
           return;
         }
+
+        console.log(
+          "[PRODUCER] enviando ICE:",
+          viewerId
+        );
 
         send({
           type:
@@ -1750,13 +1525,14 @@ function App() {
             myId.current,
 
           candidate:
-            event.candidate
+            event.candidate.toJSON
+              ? event.candidate.toJSON()
+              : event.candidate
         });
       };
 
     pc.onconnectionstatechange =
       () => {
-
         console.log(
           "[PRODUCER]",
           viewerId,
@@ -1769,7 +1545,6 @@ function App() {
           pc.connectionState ===
             "closed"
         ) {
-
           peerConnections.current.delete(
             key
           );
@@ -1781,7 +1556,6 @@ function App() {
       };
 
     try {
-
       const offer =
         await pc.createOffer();
 
@@ -1809,7 +1583,6 @@ function App() {
       );
 
     } catch (error) {
-
       console.error(
         "[PRODUCER] erro offer:",
         error
@@ -1822,17 +1595,20 @@ function App() {
       peerConnections.current.delete(
         key
       );
+
+      pendingCandidates.current.delete(
+        key
+      );
     }
   }
 
-  /* =========================================================
+  /* =======================================================
      HANDLE OFFER
-  ========================================================= */
+  ======================================================= */
 
   async function handleOffer(
     msg
   ) {
-
     const producerId =
       String(
         msg.producerId ||
@@ -1850,7 +1626,6 @@ function App() {
       !producerId ||
       !producerFrom
     ) {
-
       console.warn(
         "[VIEWER] offer inválida"
       );
@@ -1872,12 +1647,10 @@ function App() {
       );
 
     if (old) {
-
       if (
         old.signalingState !==
         "closed"
       ) {
-
         console.log(
           "[VIEWER] peer já existe:",
           key
@@ -1904,13 +1677,21 @@ function App() {
       pc
     );
 
-    /* =======================================================
+    /*
+     * IMPORTANTE:
+     * Cria a fila antes de qualquer ICE chegar.
+     */
+    pendingCandidates.current.set(
+      key,
+      []
+    );
+
+    /* =====================================================
        TRACK
-    ======================================================= */
+    ===================================================== */
 
     pc.ontrack =
       event => {
-
         console.log(
           "[VIEWER] TRACK:",
           producerId,
@@ -1922,14 +1703,12 @@ function App() {
           event.streams?.[0];
 
         if (!stream) {
-
           stream =
             streams.current.get(
               producerId
             );
 
           if (!stream) {
-
             stream =
               new MediaStream();
 
@@ -1949,18 +1728,12 @@ function App() {
               );
 
           if (!exists) {
-
             stream.addTrack(
               event.track
             );
           }
 
         } else {
-
-          /*
-           * Usa a stream original entregue
-           * pelo WebRTC.
-           */
           streams.current.set(
             producerId,
             stream
@@ -1969,16 +1742,14 @@ function App() {
 
         console.log(
           "[VIEWER] stream recebida:",
-          stream.getTracks().map(
-            track =>
-              `${track.kind}:${track.readyState}`
-          )
+          stream
+            .getTracks()
+            .map(
+              track =>
+                `${track.kind}:${track.readyState}`
+            )
         );
 
-        /*
-         * Anexa a stream aos vídeos
-         * existentes.
-         */
         attachStream(
           producerId,
           stream
@@ -1986,13 +1757,11 @@ function App() {
 
         setProducers(
           current => {
-
             if (
               current.includes(
                 producerId
               )
             ) {
-
               return current;
             }
 
@@ -2009,10 +1778,14 @@ function App() {
 
     pc.onicecandidate =
       event => {
-
         if (!event.candidate) {
           return;
         }
+
+        console.log(
+          "[VIEWER] enviando ICE:",
+          producerFrom
+        );
 
         send({
           type:
@@ -2024,13 +1797,14 @@ function App() {
           producerId,
 
           candidate:
-            event.candidate
+            event.candidate.toJSON
+              ? event.candidate.toJSON()
+              : event.candidate
         });
       };
 
     pc.onconnectionstatechange =
       () => {
-
         console.log(
           "[VIEWER]",
           producerId,
@@ -2041,7 +1815,6 @@ function App() {
           pc.connectionState ===
           "connected"
         ) {
-
           setStatus(
             "Transmissão conectada"
           );
@@ -2052,7 +1825,6 @@ function App() {
             );
 
           if (stream) {
-
             attachStream(
               producerId,
               stream
@@ -2066,7 +1838,6 @@ function App() {
           pc.connectionState ===
             "closed"
         ) {
-
           console.warn(
             "[VIEWER] conexão encerrada:",
             producerId
@@ -2075,15 +1846,30 @@ function App() {
       };
 
     try {
-
+      /*
+       * PRIMEIRO:
+       * coloca a offer como remote description.
+       */
       await pc.setRemoteDescription(
         msg.offer
       );
 
+      console.log(
+        "[VIEWER] remoteDescription configurada:",
+        producerId
+      );
+
+      /*
+       * AGORA:
+       * processa qualquer ICE que chegou antes.
+       */
       await flushPendingCandidates(
         key
       );
 
+      /*
+       * Cria answer.
+       */
       const answer =
         await pc.createAnswer();
 
@@ -2110,7 +1896,6 @@ function App() {
       });
 
     } catch (error) {
-
       console.error(
         "[VIEWER] erro offer:",
         error
@@ -2123,17 +1908,20 @@ function App() {
       peerConnections.current.delete(
         key
       );
+
+      pendingCandidates.current.delete(
+        key
+      );
     }
   }
 
-  /* =========================================================
+  /* =======================================================
      HANDLE ANSWER
-  ========================================================= */
+  ======================================================= */
 
   async function handleAnswer(
     msg
   ) {
-
     const viewerId =
       String(
         msg.from ||
@@ -2153,7 +1941,6 @@ function App() {
       );
 
     if (!pc) {
-
       console.warn(
         "[PRODUCER] peer não encontrado:",
         key
@@ -2163,12 +1950,10 @@ function App() {
     }
 
     try {
-
       if (
         pc.signalingState !==
         "have-local-offer"
       ) {
-
         console.warn(
           "[PRODUCER] estado inesperado:",
           pc.signalingState
@@ -2177,6 +1962,10 @@ function App() {
         return;
       }
 
+      /*
+       * Configura remoteDescription
+       * ANTES de processar ICE.
+       */
       await pc.setRemoteDescription(
         msg.answer
       );
@@ -2186,12 +1975,15 @@ function App() {
         viewerId
       );
 
+      /*
+       * Agora podemos adicionar os
+       * ICE candidates pendentes.
+       */
       await flushPendingCandidates(
         key
       );
 
     } catch (error) {
-
       console.error(
         "[PRODUCER] erro answer:",
         error
@@ -2199,14 +1991,13 @@ function App() {
     }
   }
 
-  /* =========================================================
+  /* =======================================================
      ICE
-  ========================================================= */
+  ======================================================= */
 
   async function handleIce(
     msg
   ) {
-
     if (!msg.candidate) {
       return;
     }
@@ -2227,92 +2018,71 @@ function App() {
       !producerId ||
       !from
     ) {
+      console.warn(
+        "[ICE] mensagem incompleta:",
+        msg
+      );
 
       return;
     }
 
-    const viewerKey =
-      `${producerId}->local`;
+    /*
+     * =====================================================
+     * IDENTIFICAÇÃO CORRETA DA CONEXÃO
+     * =====================================================
+     *
+     * Se producerId === meu ID:
+     *
+     *    Eu sou o PRODUTOR.
+     *
+     * Então o ICE veio do viewer:
+     *
+     *    local->viewer
+     *
+     * Caso contrário:
+     *
+     *    Eu sou o VIEWER.
+     *
+     * E o produtor é producerId:
+     *
+     *    producer->local
+     */
 
-    const producerKey =
-      `local->${from}`;
+    let key;
 
-    let key =
-      null;
+    if (
+      producerId ===
+      myId.current
+    ) {
+      key =
+        `local->${from}`;
+    } else {
+      key =
+        `${producerId}->local`;
+    }
 
     let pc =
-      null;
+      peerConnections.current.get(
+        key
+      );
 
-    if (
-      peerConnections.current.has(
-        viewerKey
-      )
-    ) {
-
-      key =
-        viewerKey;
-
-      pc =
-        peerConnections.current.get(
-          viewerKey
-        );
-
-    } else if (
-      peerConnections.current.has(
-        producerKey
-      )
-    ) {
-
-      key =
-        producerKey;
-
-      pc =
-        peerConnections.current.get(
-          producerKey
-        );
-    }
+    /*
+     * =====================================================
+     * SE A PEER AINDA NÃO EXISTE
+     * =====================================================
+     */
 
     if (!pc) {
-
-      const pendingKey =
-        from ===
-        producerId
-          ? viewerKey
-          : producerKey;
-
-      if (
-        !pendingCandidates.current.has(
-          pendingKey
-        )
-      ) {
-
-        pendingCandidates.current.set(
-          pendingKey,
-          []
-        );
-      }
-
-      pendingCandidates.current
-        .get(
-          pendingKey
-        )
-        .push(
-          msg.candidate
-        );
-
-      return;
-    }
-
-    if (
-      !pc.remoteDescription
-    ) {
+      console.log(
+        "[ICE] peer ainda não existe, enfileirando:",
+        key
+      );
 
       if (
         !pendingCandidates.current.has(
           key
         )
       ) {
-
         pendingCandidates.current.set(
           key,
           []
@@ -2328,35 +2098,97 @@ function App() {
       return;
     }
 
-    try {
+    /*
+     * =====================================================
+     * REMOTE DESCRIPTION AINDA NÃO EXISTE
+     * =====================================================
+     */
 
+    if (
+      !pc.remoteDescription
+    ) {
+      console.log(
+        "[ICE] remoteDescription ainda não existe, enfileirando:",
+        key
+      );
+
+      if (
+        !pendingCandidates.current.has(
+          key
+        )
+      ) {
+        pendingCandidates.current.set(
+          key,
+          []
+        );
+      }
+
+      pendingCandidates.current
+        .get(key)
+        .push(
+          msg.candidate
+        );
+
+      return;
+    }
+
+    /*
+     * =====================================================
+     * REMOTE DESCRIPTION EXISTE
+     * =====================================================
+     */
+
+    try {
       await pc.addIceCandidate(
         msg.candidate
       );
 
+      console.log(
+        "[ICE] candidato adicionado:",
+        key
+      );
+
     } catch (error) {
+      console.warn(
+        "[ICE] erro ao adicionar candidato:",
+        key,
+        error
+      );
 
+      /*
+       * Se o browser rejeitar por causa
+       * de timing, guardamos novamente.
+       */
       if (
-        error?.name !==
-        "InvalidStateError"
+        !pc.remoteDescription
       ) {
+        if (
+          !pendingCandidates.current.has(
+            key
+          )
+        ) {
+          pendingCandidates.current.set(
+            key,
+            []
+          );
+        }
 
-        console.warn(
-          "[ICE] erro:",
-          error
-        );
+        pendingCandidates.current
+          .get(key)
+          .push(
+            msg.candidate
+          );
       }
     }
   }
 
-  /* =========================================================
+  /* =======================================================
      FLUSH ICE
-  ========================================================= */
+  ======================================================= */
 
   async function flushPendingCandidates(
     key
   ) {
-
     const pc =
       peerConnections.current.get(
         key
@@ -2369,6 +2201,10 @@ function App() {
     if (
       !pc.remoteDescription
     ) {
+      console.log(
+        "[ICE] flush cancelado: sem remoteDescription",
+        key
+      );
 
       return;
     }
@@ -2382,11 +2218,20 @@ function App() {
       !list ||
       list.length === 0
     ) {
-
       return;
     }
 
+    /*
+     * Remove a fila antes de processar.
+     * Se algum candidato falhar, não fica
+     * preso eternamente na fila.
+     */
     pendingCandidates.current.delete(
+      key
+    );
+
+    console.log(
+      `[ICE] processando ${list.length} candidatos pendentes:`,
       key
     );
 
@@ -2394,37 +2239,33 @@ function App() {
       const candidate
       of list
     ) {
-
       try {
-
         await pc.addIceCandidate(
           candidate
         );
 
+        console.log(
+          "[ICE] candidato pendente adicionado:",
+          key
+        );
+
       } catch (error) {
-
-        if (
-          error?.name !==
-          "InvalidStateError"
-        ) {
-
-          console.warn(
-            "[ICE] pending:",
-            error
-          );
-        }
+        console.warn(
+          "[ICE] erro no candidato pendente:",
+          key,
+          error
+        );
       }
     }
   }
 
-  /* =========================================================
+  /* =======================================================
      REMOVE REMOTE
-  ========================================================= */
+  ======================================================= */
 
   function removeRemoteProducer(
     producerId
   ) {
-
     if (!producerId) {
       return;
     }
@@ -2447,7 +2288,6 @@ function App() {
       );
 
     if (pc) {
-
       try {
         pc.close();
       } catch {}
@@ -2484,7 +2324,6 @@ function App() {
 
     setAudioStates(
       current => {
-
         const next = {
           ...current
         };
@@ -2499,12 +2338,10 @@ function App() {
 
     setSelectedProducer(
       current => {
-
         if (
           current !==
           producerId
         ) {
-
           return current;
         }
 
@@ -2513,14 +2350,13 @@ function App() {
     );
   }
 
-  /* =========================================================
+  /* =======================================================
      AUDIO
-  ========================================================= */
+  ======================================================= */
 
   function toggleAudio(
     producerId
   ) {
-
     const next =
       !(
         audioStates[
@@ -2549,45 +2385,32 @@ function App() {
       const video
       of videos
     ) {
-
       video.muted =
         !next;
 
       video.volume =
         1;
 
-      /*
-       * Só tenta tocar se já tiver
-       * metadata carregada.
-       */
-      if (
-        next &&
-        video.readyState >=
-          HTMLMediaElement.HAVE_METADATA
-      ) {
-
-        playVideoSafely(
-          video
-        );
+      if (next) {
+        video.play()
+          .catch(() => {});
       }
     }
   }
 
-  /* =========================================================
+  /* =======================================================
      SELECT
-  ========================================================= */
+  ======================================================= */
 
   function selectProducer(
     producerId
   ) {
-
     setSelectedProducer(
       producerId
     );
 
     setTimeout(
       () => {
-
         const stream =
           streams.current.get(
             producerId
@@ -2601,27 +2424,23 @@ function App() {
           producerId,
           stream
         );
-
       },
       0
     );
   }
 
-  /* =========================================================
+  /* =======================================================
      CLEANUP
-  ========================================================= */
+  ======================================================= */
 
   function cleanupStreams() {
-
     if (
       localStream.current
     ) {
-
       localStream.current
         .getTracks()
         .forEach(
           track => {
-
             try {
               track.stop();
             } catch {}
@@ -2636,12 +2455,10 @@ function App() {
       const stream
       of streams.current.values()
     ) {
-
       stream
         .getTracks()
         .forEach(
           track => {
-
             try {
               track.stop();
             } catch {}
@@ -2655,7 +2472,6 @@ function App() {
       const pc
       of peerConnections.current.values()
     ) {
-
       try {
         pc.close();
       } catch {}
@@ -2671,23 +2487,14 @@ function App() {
       const videos
       of videoRefs.current.values()
     ) {
-
       for (
         const video
         of videos
       ) {
-
         try {
-
           video.pause();
-
           video.srcObject =
             null;
-
-          attachedStreams.current.delete(
-            video
-          );
-
         } catch {}
       }
     }
@@ -2696,32 +2503,22 @@ function App() {
   }
 
   function cleanupAll() {
-
     cleanupStreams();
 
     roomId.current =
       "";
 
-    setSharing(
-      false
-    );
-
-    setProducers(
-      []
-    );
-
+    setSharing(false);
+    setProducers([]);
     setSelectedProducer(
       "local"
     );
-
-    setViewerCount(
-      0
-    );
+    setViewerCount(0);
   }
 
-  /* =========================================================
+  /* =======================================================
      DERIVADOS
-  ========================================================= */
+  ======================================================= */
 
   const displayProducers =
     [
@@ -2749,9 +2546,9 @@ function App() {
         )
       : selectedProducer;
 
-  /* =========================================================
+  /* =======================================================
      RENDER
-  ========================================================= */
+  ======================================================= */
 
   return (
     <main className="app">
@@ -2808,12 +2605,10 @@ function App() {
               }
               onKeyDown={
                 event => {
-
                   if (
                     event.key ===
                     "Enter"
                   ) {
-
                     joinRoom();
                   }
                 }
@@ -2928,14 +2723,11 @@ function App() {
                       <video
                         ref={
                           element => {
-
                             if (element) {
-
                               registerVideo(
                                 "local",
                                 element
                               );
-
                             }
                           }
                         }
@@ -2965,14 +2757,11 @@ function App() {
                     <video
                       ref={
                         element => {
-
                           if (element) {
-
                             registerVideo(
                               mainProducer,
                               element
                             );
-
                           }
                         }
                       }
@@ -3103,14 +2892,11 @@ function App() {
                           <video
                             ref={
                               element => {
-
                                 if (element) {
-
                                   registerVideo(
                                     producerId,
                                     element
                                   );
-
                                 }
                               }
                             }
@@ -3145,7 +2931,6 @@ function App() {
                             className="thumb-audio"
                             onClick={
                               event => {
-
                                 event.stopPropagation();
 
                                 toggleAudio(
@@ -3258,7 +3043,6 @@ const root =
   );
 
 if (!root) {
-
   throw new Error(
     "Elemento #root não encontrado."
   );
@@ -3267,4 +3051,3 @@ if (!root) {
 createRoot(root).render(
   <App />
 );
-
