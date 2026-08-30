@@ -6,13 +6,13 @@ html,
 body,
 #root {
   width: 100%;
-  min-height: 100%;
+  height: 100%;
   margin: 0;
 }
 
 body {
   font-family: Arial, sans-serif;
-  background: #111214;
+  background: #0b0c0f;
   color: #ffffff;
 }
 
@@ -25,9 +25,10 @@ button {
   cursor: pointer;
 }
 
-button:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid #5865f2;
+  outline-offset: 2px;
 }
 
 /* =========================================================
@@ -36,94 +37,89 @@ button:disabled {
 
 .app {
   width: 100%;
-  min-height: 100vh;
-  padding: 24px;
+  min-height: 100%;
+  background:
+    radial-gradient(
+      circle at top left,
+      rgba(88, 101, 242, 0.08),
+      transparent 35%
+    ),
+    #0b0c0f;
 }
 
 /* =========================================================
-   TOPBAR
-========================================================= */
-
-.topbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-
-  max-width: 1920px;
-  margin: 0 auto 20px;
-}
-
-.eyebrow {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 2px;
-  opacity: 0.55;
-}
-
-h1,
-h2,
-p {
-  margin-top: 0;
-}
-
-h1 {
-  margin-bottom: 0;
-  font-size: 28px;
-}
-
-.status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-
-  font-size: 13px;
-  opacity: 0.75;
-}
-
-.dot {
-  width: 9px;
-  height: 9px;
-  flex-shrink: 0;
-
-  border-radius: 50%;
-  background: #666;
-}
-
-.dot.on {
-  background: #23d47a;
-  box-shadow:
-    0 0 10px
-    rgba(35, 212, 122, 0.6);
-}
-
-/* =========================================================
-   SALA MENU
+   ROOM MENU
 ========================================================= */
 
 .room-menu {
-  width: min(460px, 100%);
-
-  margin: 80px auto 0;
-  padding: 32px;
+  width: min(480px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 42px 36px;
+  position: relative;
+  top: 50%;
+  transform: translateY(-50%);
 
   border: 1px solid #292b30;
-  border-radius: 18px;
+  border-radius: 20px;
 
   background: #18191c;
 
   box-shadow:
-    0 20px 60px
-    rgba(0, 0, 0, 0.25);
+    0 25px 80px rgba(0, 0, 0, 0.45);
 }
 
-.room-menu h2 {
+.brand {
+  margin-bottom: 28px;
+}
+
+.eyebrow {
+  display: block;
   margin-bottom: 8px;
-  font-size: 26px;
+
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+
+  color: #949ba4;
 }
 
-.room-menu > .muted {
-  margin-bottom: 24px;
+.brand h1 {
+  margin: 0 0 12px;
+
+  font-size: 32px;
+  line-height: 1;
+}
+
+.muted {
+  margin: 0;
+
+  color: #a8abb2;
+  line-height: 1.55;
+}
+
+/* =========================================================
+   DIVIDER
+========================================================= */
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  margin: 22px 0;
+
+  color: #6f737b;
+  font-size: 12px;
+}
+
+.divider::before,
+.divider::after {
+  content: "";
+  flex: 1;
+
+  height: 1px;
+
+  background: #292b30;
 }
 
 /* =========================================================
@@ -132,20 +128,15 @@ h1 {
 
 .join-box {
   display: grid;
-
-  grid-template-columns:
-    minmax(0, 1fr)
-    100px;
+  grid-template-columns: 1fr 100px;
 
   gap: 10px;
-
-  margin-top: 12px;
 }
 
 .join-box input {
   width: 100%;
 
-  padding: 13px 14px;
+  padding: 14px;
 
   border: 1px solid #35373c;
   border-radius: 10px;
@@ -158,6 +149,8 @@ h1 {
   text-align: center;
   text-transform: uppercase;
 
+  letter-spacing: 2px;
+
   transition:
     border-color 0.2s,
     box-shadow 0.2s;
@@ -166,6 +159,7 @@ h1 {
 .join-box input::placeholder {
   color: #777b83;
   text-transform: none;
+  letter-spacing: 0;
 }
 
 .join-box input:focus {
@@ -173,29 +167,60 @@ h1 {
 
   box-shadow:
     0 0 0 3px
-    rgba(88, 101, 242, 0.12);
+      rgba(88, 101, 242, 0.15);
 }
 
-.join-box button {
-  border: 0;
-  border-radius: 10px;
+/* =========================================================
+   CONNECTION
+========================================================= */
 
-  background: #2b2d31;
-  color: white;
+.connection {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 
-  font-weight: 700;
+  gap: 8px;
 
-  transition:
-    background 0.2s,
-    transform 0.15s;
+  margin-top: 24px;
+
+  color: #858991;
+
+  font-size: 12px;
 }
 
-.join-box button:hover {
-  background: #34373c;
+/* =========================================================
+   DOT
+========================================================= */
+
+.dot {
+  width: 8px;
+  height: 8px;
+
+  flex: 0 0 auto;
+
+  border-radius: 50%;
+
+  background: #666;
 }
 
-.join-box button:active {
-  transform: scale(0.97);
+.dot.on {
+  background: #23d47a;
+
+  box-shadow:
+    0 0 10px
+      rgba(35, 212, 122, 0.6);
+}
+
+/* =========================================================
+   ROOM LAYOUT
+========================================================= */
+
+.room-layout {
+  width: 100%;
+  min-height: 100vh;
+
+  display: flex;
+  flex-direction: column;
 }
 
 /* =========================================================
@@ -203,10 +228,9 @@ h1 {
 ========================================================= */
 
 .room-bar {
-  max-width: 1920px;
+  min-height: 64px;
 
-  margin: 0 auto 16px;
-  padding: 12px 16px;
+  padding: 10px 18px;
 
   display: flex;
   align-items: center;
@@ -214,19 +238,19 @@ h1 {
 
   gap: 20px;
 
-  border: 1px solid #292b30;
-  border-radius: 12px;
+  border-bottom: 1px solid #292b30;
 
   background: #18191c;
 }
 
-.room-bar > div:first-child {
+.room-info {
   display: flex;
   align-items: center;
+
   gap: 12px;
 }
 
-.room-bar span {
+.room-info > span:first-child {
   color: #777b83;
 
   font-size: 10px;
@@ -235,46 +259,78 @@ h1 {
   letter-spacing: 1.5px;
 }
 
-.room-bar strong {
+.room-info strong {
   padding: 7px 12px;
 
-  border-radius: 8px;
+  border-radius: 7px;
 
   background: #111214;
 
-  color: #ffffff;
+  font-size: 14px;
 
-  font-size: 15px;
   letter-spacing: 3px;
+}
+
+.live-users {
+  color: #a8abb2;
+
+  font-size: 12px;
 }
 
 .room-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+
+  gap: 14px;
 }
 
-.room-actions .secondary {
-  width: auto;
-  margin: 0;
+.server-status {
+  display: flex;
+  align-items: center;
+
+  gap: 7px;
+
+  color: #858991;
+
+  font-size: 11px;
 }
 
-.stream-counter {
-  color: #949ba4 !important;
+.leave-button {
+  border: 0;
+  border-radius: 7px;
 
-  font-size: 12px !important;
-  letter-spacing: 0 !important;
+  padding: 8px 13px;
+
+  background: #2b2d31;
+
+  color: white;
+
+  font-size: 12px;
+  font-weight: 700;
+
+  transition:
+    background 0.2s,
+    transform 0.15s;
+}
+
+.leave-button:hover {
+  background: #da373c;
+}
+
+.leave-button:active {
+  transform: scale(0.96);
 }
 
 /* =========================================================
-   STAGE
+   BROADCAST LAYOUT
 ========================================================= */
 
-.stage {
+.broadcast-layout {
   width: 100%;
-  max-width: 1920px;
 
-  margin: 0 auto;
+  flex: 1;
+
+  min-height: 0;
 
   display: grid;
 
@@ -282,252 +338,163 @@ h1 {
     minmax(0, 1fr)
     300px;
 
-  gap: 16px;
-
-  align-items: start;
+  gap: 0;
 }
 
 /* =========================================================
-   VIDEO AREA
+   MAIN STAGE
 ========================================================= */
 
-.video-area {
-  position: relative;
-
-  width: 100%;
-
-  /*
-   * Área 16:9.
-   *
-   * Em telas grandes pode chegar
-   * a aproximadamente 1920x1080.
-   */
-
-  aspect-ratio: 16 / 9;
-
-  min-height: 500px;
-
-  overflow: hidden;
-
-  border: 1px solid #292b30;
-  border-radius: 14px;
-
-  background: #08090a;
+.main-stage {
+  min-width: 0;
+  min-height: 0;
 
   display: flex;
   align-items: center;
   justify-content: center;
+
+  padding: 18px;
+
+  background: #08090a;
 }
 
-/* =========================================================
-   MAIN VIDEO
-========================================================= */
-
-.main-video {
+.main-video-wrapper {
   position: relative;
 
   width: 100%;
   height: 100%;
 
-  overflow: hidden;
-
-  background: #000;
-}
-
-.main-video-element {
-  width: 100%;
-  height: 100%;
-
-  display: block;
-
-  object-fit: contain;
-
-  background: #000;
-}
-
-/* =========================================================
-   STREAM
-========================================================= */
-
-.stream {
-  position: relative;
-
-  overflow: hidden;
-
-  background: #000;
-
-  border: 1px solid #292b30;
-
-  cursor: pointer;
-
-  transition:
-    transform 0.15s,
-    border-color 0.15s,
-    box-shadow 0.15s;
-}
-
-.stream:hover {
-  border-color: #5865f2;
-
-  box-shadow:
-    0 0 0 1px
-    rgba(88, 101, 242, 0.35);
-}
-
-.main-stream {
-  width: 100%;
-  height: 100%;
-
-  border: 0;
-
-  cursor: default;
-}
-
-.mini-stream {
-  flex: 1;
-
-  min-width: 0;
-
-  aspect-ratio: 16 / 9;
-
-  border-radius: 10px;
-}
-
-.stream-video {
-  width: 100%;
-  height: 100%;
-
-  display: block;
-
-  object-fit: contain;
-
-  background: #000;
-}
-
-/* =========================================================
-   MINI STREAMS
-========================================================= */
-
-.mini-streams {
-  position: absolute;
-
-  right: 14px;
-  bottom: 14px;
-
-  width: min(42%, 520px);
+  min-height: 0;
 
   display: flex;
+  align-items: center;
+  justify-content: center;
 
-  gap: 8px;
+  overflow: hidden;
 
-  z-index: 10;
-}
+  border-radius: 12px;
 
-.mini-streams .mini-stream {
-  flex: 1;
+  background: #000;
 
   box-shadow:
-    0 8px 25px
-    rgba(0, 0, 0, 0.55);
+    0 20px 70px
+      rgba(0, 0, 0, 0.35);
+}
+
+.main-video-wrapper video {
+  width: 100%;
+  height: 100%;
+
+  display: block;
+
+  object-fit: contain;
+
+  background: #000;
+}
+
+/*
+ * Área principal em 16:9.
+ *
+ * Em telas grandes ela ocupa
+ * praticamente tudo.
+ */
+
+@media (min-width: 1000px) {
+
+  .main-video-wrapper {
+    aspect-ratio: 16 / 9;
+
+    max-height: calc(
+      100vh - 105px
+    );
+  }
+
 }
 
 /* =========================================================
-   STREAM LABEL
+   MAIN OVERLAY
 ========================================================= */
 
-.stream-label {
+.main-overlay {
   position: absolute;
 
-  left: 8px;
-  right: 8px;
-  bottom: 8px;
+  left: 0;
+  right: 0;
+  bottom: 0;
 
-  min-height: 28px;
-
-  padding: 5px 7px;
+  padding: 14px;
 
   display: flex;
   align-items: center;
   justify-content: space-between;
 
-  gap: 8px;
+  background:
+    linear-gradient(
+      transparent,
+      rgba(0, 0, 0, 0.75)
+    );
+
+  pointer-events: none;
+}
+
+.stream-title {
+  padding: 6px 9px;
 
   border-radius: 6px;
 
-  background:
-    rgba(0, 0, 0, 0.72);
+  background: rgba(
+    0,
+    0,
+    0,
+    0.55
+  );
 
   backdrop-filter: blur(6px);
 
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
 }
 
-.stream-label span {
-  color: #ffffff;
-}
-
-/* =========================================================
-   AUDIO BUTTON
-========================================================= */
-
 .audio-button {
-  width: 27px;
-  height: 27px;
+  pointer-events: auto;
 
-  padding: 0;
+  width: 38px;
+  height: 38px;
 
-  border: 0;
-  border-radius: 6px;
-
-  background:
+  border: 1px solid
     rgba(255, 255, 255, 0.12);
+
+  border-radius: 50%;
+
+  background: rgba(
+    0,
+    0,
+    0,
+    0.65
+  );
 
   color: white;
 
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  font-size: 16px;
 
-  cursor: pointer;
+  backdrop-filter: blur(8px);
 
   transition:
-    background 0.15s,
+    background 0.2s,
     transform 0.15s;
 }
 
 .audio-button:hover {
-  background:
-    rgba(255, 255, 255, 0.22);
+  background: rgba(
+    255,
+    255,
+    255,
+    0.15
+  );
 }
 
 .audio-button:active {
   transform: scale(0.92);
-}
-
-/* =========================================================
-   MAIN BADGE
-========================================================= */
-
-.main-badge {
-  position: absolute;
-
-  top: 14px;
-  left: 14px;
-
-  padding: 7px 10px;
-
-  border-radius: 7px;
-
-  background:
-    rgba(0, 0, 0, 0.72);
-
-  backdrop-filter: blur(6px);
-
-  font-size: 11px;
-  font-weight: 700;
-
-  z-index: 20;
 }
 
 /* =========================================================
@@ -536,73 +503,394 @@ h1 {
 
 .empty {
   width: 100%;
+  height: 100%;
+
+  display: flex;
+  flex-direction: column;
+
+  align-items: center;
+  justify-content: center;
+
+  text-align: center;
 
   padding: 40px;
 
-  text-align: center;
+  color: #a8abb2;
+}
+
+.empty-icon {
+  margin-bottom: 16px;
+
+  font-size: 48px;
 
   opacity: 0.65;
 }
 
-.screen-icon {
-  margin-bottom: 18px;
-
-  font-size: 52px;
-}
-
 .empty h2 {
-  margin-bottom: 8px;
+  margin: 0 0 8px;
+
+  color: white;
+
+  font-size: 20px;
 }
 
 .empty p {
-  max-width: 420px;
+  margin: 0;
 
-  margin: 0 auto;
+  color: #777b83;
 
   line-height: 1.5;
 }
 
 /* =========================================================
-   PANEL
+   SIDEBAR
 ========================================================= */
 
-.panel {
+.streams-sidebar {
+  min-height: 0;
+
+  display: flex;
+  flex-direction: column;
+
+  border-left: 1px solid #292b30;
+
+  background: #111214;
+}
+
+/* =========================================================
+   SIDEBAR HEADER
+========================================================= */
+
+.sidebar-header {
+  padding: 14px 16px;
+
+  border-bottom: 1px solid #292b30;
+}
+
+.sidebar-header > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  gap: 10px;
+}
+
+.sidebar-header strong {
+  font-size: 14px;
+}
+
+.sidebar-header span {
+  color: #777b83;
+
+  font-size: 11px;
+}
+
+/* =========================================================
+   STREAM LIST
+========================================================= */
+
+.stream-list {
+  flex: 1;
+
+  min-height: 0;
+
+  overflow-y: auto;
+
+  padding: 12px;
+
+  display: flex;
+  flex-direction: column;
+
+  gap: 10px;
+}
+
+/* =========================================================
+   STREAM THUMB
+========================================================= */
+
+.stream-thumb {
+  width: 100%;
+
+  padding: 0;
+
   border: 1px solid #292b30;
+  border-radius: 10px;
+
+  overflow: hidden;
 
   background: #18191c;
 
-  border-radius: 14px;
+  color: white;
 
-  padding: 20px;
+  text-align: left;
+
+  transition:
+    border-color 0.2s,
+    transform 0.15s,
+    background 0.2s;
 }
 
-.panel h2 {
-  margin-bottom: 8px;
+.stream-thumb:hover {
+  background: #1e2024;
+
+  transform: translateY(-1px);
 }
 
-.muted {
-  color: #a8abb2;
+.stream-thumb.selected {
+  border-color: #5865f2;
 
-  line-height: 1.5;
+  box-shadow:
+    0 0 0 1px
+      rgba(88, 101, 242, 0.25);
 }
 
 /* =========================================================
-   BUTTONS
+   THUMB VIDEO
 ========================================================= */
 
-.primary,
-.secondary,
-.danger {
+.thumb-video {
+  position: relative;
+
+  width: 100%;
+
+  aspect-ratio: 16 / 9;
+
+  overflow: hidden;
+
+  background: #000;
+}
+
+.thumb-video video {
+  width: 100%;
+  height: 100%;
+
+  display: block;
+
+  object-fit: cover;
+
+  background: #000;
+}
+
+.thumb-live {
+  position: absolute;
+
+  top: 7px;
+  left: 7px;
+
+  padding: 4px 6px;
+
+  border-radius: 5px;
+
+  background: rgba(
+    0,
+    0,
+    0,
+    0.72
+  );
+
+  color: #ffffff;
+
+  font-size: 8px;
+  font-weight: 700;
+
+  letter-spacing: 0.5px;
+}
+
+/* =========================================================
+   THUMB INFO
+========================================================= */
+
+.thumb-info {
+  min-height: 38px;
+
+  padding: 7px 9px;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  gap: 10px;
+}
+
+.thumb-info > span:first-child {
+  overflow: hidden;
+
+  color: #d6d8dc;
+
+  font-size: 11px;
+  font-weight: 700;
+
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thumb-audio {
+  width: 26px;
+  height: 26px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  flex: 0 0 auto;
+
+  border-radius: 6px;
+
+  background: #25272b;
+
+  font-size: 12px;
+
+  transition:
+    background 0.2s;
+}
+
+.thumb-audio:hover {
+  background: #34373c;
+}
+
+/* =========================================================
+   NO STREAMS
+========================================================= */
+
+.no-streams {
+  min-height: 150px;
+
+  display: flex;
+  flex-direction: column;
+
+  align-items: center;
+  justify-content: center;
+
+  gap: 8px;
+
+  color: #6f737b;
+
+  text-align: center;
+}
+
+.no-streams span {
+  font-size: 30px;
+
+  opacity: 0.5;
+}
+
+.no-streams p {
+  margin: 0;
+
+  font-size: 11px;
+}
+
+/* =========================================================
+   CONTROLS
+========================================================= */
+
+.controls {
+  padding: 12px;
+
+  border-top: 1px solid #292b30;
+
+  background: #18191c;
+}
+
+.share-button,
+.stop-button {
   width: 100%;
 
   border: 0;
-  border-radius: 9px;
+  border-radius: 8px;
 
-  padding: 12px 15px;
+  padding: 12px 14px;
 
+  color: white;
+
+  font-size: 12px;
   font-weight: 700;
 
-  margin-top: 12px;
+  transition:
+    filter 0.2s,
+    background 0.2s,
+    transform 0.15s;
+}
+
+.share-button {
+  background: #5865f2;
+}
+
+.share-button:hover {
+  filter: brightness(1.08);
+}
+
+.stop-button {
+  background: #da373c;
+}
+
+.stop-button:hover {
+  filter: brightness(1.08);
+}
+
+.share-button:active,
+.stop-button:active {
+  transform: scale(0.98);
+}
+
+/* =========================================================
+   LIMIT INFO
+========================================================= */
+
+.limit-info {
+  margin-top: 9px;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  color: #777b83;
+
+  font-size: 10px;
+}
+
+.limit-info strong {
+  color: #a8abb2;
+}
+
+/* =========================================================
+   ERROR
+========================================================= */
+
+.error {
+  margin: 10px 12px;
+
+  padding: 10px;
+
+  border: 1px solid
+    rgba(218, 55, 60, 0.4);
+
+  border-radius: 8px;
+
+  background:
+    rgba(218, 55, 60, 0.12);
+
+  color: #ff8a8f;
+
+  font-size: 11px;
+
+  line-height: 1.4;
+}
+
+/* =========================================================
+   PRIMARY / SECONDARY
+========================================================= */
+
+.primary,
+.secondary {
+  width: 100%;
+
+  border: 0;
+  border-radius: 10px;
+
+  padding: 14px 16px;
+
+  font-weight: 700;
 
   transition:
     filter 0.2s,
@@ -619,12 +907,6 @@ h1 {
   filter: brightness(1.08);
 }
 
-.primary:active,
-.secondary:active,
-.danger:active {
-  transform: scale(0.98);
-}
-
 .secondary {
   background: #2b2d31;
   color: white;
@@ -634,182 +916,109 @@ h1 {
   background: #34373c;
 }
 
-.danger {
-  background: #da373c;
-  color: white;
-}
-
-.danger:hover {
-  filter: brightness(1.08);
+.primary:active,
+.secondary:active {
+  transform: scale(0.98);
 }
 
 /* =========================================================
-   STATS
+   SCROLLBAR
 ========================================================= */
 
-.stats {
-  display: grid;
-
-  grid-template-columns:
-    1fr 1fr;
-
-  gap: 8px;
-
-  margin-top: 18px;
+.stream-list::-webkit-scrollbar {
+  width: 6px;
 }
 
-.stats > div {
-  padding: 13px;
-
-  background: #111214;
-
-  border-radius: 9px;
+.stream-list::-webkit-scrollbar-track {
+  background: transparent;
 }
 
-.stats strong {
-  display: block;
-
-  font-size: 19px;
-
-  margin-bottom: 4px;
-}
-
-.stats span {
-  color: #949ba4;
-
-  font-size: 11px;
-}
-
-/* =========================================================
-   ERROR
-========================================================= */
-
-.error {
-  margin-top: 14px;
-
-  padding: 11px;
-
-  border-radius: 8px;
-
-  background:
-    rgba(218, 55, 60, 0.15);
-
-  border:
-    1px solid
-    rgba(218, 55, 60, 0.4);
-
-  color: #ff8a8f;
-
-  font-size: 13px;
-
-  line-height: 1.4;
-}
-
-/* =========================================================
-   SMALL
-========================================================= */
-
-small {
-  display: block;
-
-  margin-top: 18px;
-
-  color: #777b83;
-
-  line-height: 1.5;
-}
-
-/* =========================================================
-   ROOM CODE
-========================================================= */
-
-.room-code {
-  margin: 16px 0;
-
-  padding: 14px;
-
+.stream-list::-webkit-scrollbar-thumb {
   border-radius: 10px;
 
-  background: #111214;
-
-  text-align: center;
+  background: #2b2d31;
 }
 
-.room-code span {
-  display: block;
-
-  margin-bottom: 4px;
-
-  color: #777b83;
-
-  font-size: 10px;
-
-  font-weight: 700;
-
-  letter-spacing: 1.5px;
-}
-
-.room-code strong {
-  font-size: 26px;
-
-  letter-spacing: 4px;
-}
-
-/* =========================================================
-   MOBILE
-========================================================= */
-
-@media (max-width: 1100px) {
-
-  .stage {
-    grid-template-columns:
-      minmax(0, 1fr)
-      260px;
-  }
-
-  .panel {
-    padding: 16px;
-  }
-
+.stream-list::-webkit-scrollbar-thumb:hover {
+  background: #34373c;
 }
 
 /* =========================================================
    TABLET
 ========================================================= */
 
-@media (max-width: 800px) {
+@media (max-width: 900px) {
 
-  .app {
-    padding: 14px;
+  .broadcast-layout {
+    grid-template-columns:
+      1fr;
   }
 
-  .topbar {
-    align-items: flex-start;
+  .main-stage {
+    min-height: 55vh;
+  }
+
+  .streams-sidebar {
+    border-left: 0;
+
+    border-top: 1px solid #292b30;
+  }
+
+  .stream-list {
+    display: grid;
+
+    grid-template-columns:
+      repeat(
+        auto-fit,
+        minmax(180px, 1fr)
+      );
+  }
+
+  .controls {
+    display: flex;
+
+    align-items: center;
+
+    gap: 10px;
+  }
+
+  .controls .share-button,
+  .controls .stop-button {
+    flex: 1;
+  }
+
+  .limit-info {
+    width: 120px;
+
+    margin: 0;
 
     flex-direction: column;
 
-    margin-bottom: 14px;
-  }
+    align-items: flex-end;
 
-  .stage {
-    grid-template-columns: 1fr;
+    gap: 3px;
   }
+}
 
-  .video-area {
-    min-height: 350px;
-  }
+/* =========================================================
+   MOBILE
+========================================================= */
 
-  .panel {
-    width: 100%;
+@media (max-width: 600px) {
+
+  .room-menu {
+    padding: 28px 22px;
   }
 
   .room-bar {
+    padding: 10px 12px;
+
     align-items: flex-start;
 
     flex-direction: column;
   }
 
-  .room-bar > div:first-child {
+  .room-info {
     width: 100%;
 
     justify-content: space-between;
@@ -817,102 +1026,69 @@ small {
 
   .room-actions {
     width: 100%;
+
+    justify-content: space-between;
   }
 
-  .room-actions .secondary {
-    flex: 1;
+  .server-status {
+    overflow: hidden;
+
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  .mini-streams {
-    width: 50%;
+  .main-stage {
+    padding: 8px;
 
-    right: 10px;
-    bottom: 10px;
+    min-height: 45vh;
   }
 
-}
+  .main-video-wrapper {
+    border-radius: 8px;
+  }
 
-/* =========================================================
-   CELULAR
-========================================================= */
+  .stream-list {
+    grid-template-columns:
+      repeat(
+        2,
+        minmax(0, 1fr)
+      );
 
-@media (max-width: 480px) {
+    padding: 8px;
 
-  .room-menu {
-    margin-top: 35px;
+    gap: 8px;
+  }
 
-    padding: 24px;
+  .controls {
+    padding: 8px;
+  }
+
+  .limit-info {
+    display: none;
   }
 
   .join-box {
-    grid-template-columns: 1fr;
+    grid-template-columns:
+      1fr;
   }
 
   .join-box button {
     min-height: 44px;
   }
+}
 
-  .room-bar > div:first-child {
-    align-items: flex-start;
+/* =========================================================
+   VERY SMALL
+========================================================= */
 
-    flex-direction: column;
+@media (max-width: 400px) {
 
-    gap: 8px;
+  .stream-list {
+    grid-template-columns:
+      1fr;
   }
 
-  .room-actions {
-    align-items: stretch;
-
-    flex-direction: column;
+  .room-info {
+    flex-wrap: wrap;
   }
-
-  .stream-counter {
-    text-align: center;
-  }
-
-  .video-area {
-    min-height: 260px;
-
-    border-radius: 10px;
-  }
-
-  .mini-streams {
-    position: absolute;
-
-    width: 55%;
-
-    right: 7px;
-    bottom: 7px;
-
-    gap: 5px;
-  }
-
-  .stream-label {
-    left: 4px;
-    right: 4px;
-    bottom: 4px;
-
-    min-height: 22px;
-
-    padding: 3px 5px;
-
-    font-size: 8px;
-  }
-
-  .audio-button {
-    width: 22px;
-    height: 22px;
-
-    font-size: 11px;
-  }
-
-  .main-badge {
-    top: 7px;
-    left: 7px;
-
-    padding: 5px 7px;
-
-    font-size: 9px;
-  }
-
 }
