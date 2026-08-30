@@ -30,6 +30,9 @@ const TURN_SERVER_URL =
 
 const MAX_PRODUCERS = 3;
 
+const RETRY_DELAY = 1500;
+const MAX_NEGOTIATION_RETRIES = 5;
+
 let discordSdk = null;
 
 /* =========================================================
@@ -44,11 +47,8 @@ async function getIceServers() {
       await fetch(
         `${TURN_SERVER_URL}/turn-credentials`,
         {
-          method:
-            "GET",
-
-          cache:
-            "no-store"
+          method: "GET",
+          cache: "no-store"
         }
       );
 
@@ -117,23 +117,6 @@ function App() {
     setSharing
   ] = useState(false);
 
-  /*
-   * Define se o áudio da fonte
-   * compartilhada será enviado.
-   *
-   * IMPORTANTE:
-   * isso controla o áudio fornecido
-   * pelo getDisplayMedia().
-   *
-   * Para evitar áudio do Discord,
-   * o ideal é compartilhar somente
-   * a janela/aba do aplicativo desejado.
-   */
-  const [
-    shareAudio,
-    setShareAudio
-  ] = useState(false);
-
   const [
     roomCode,
     setRoomCode
@@ -164,11 +147,6 @@ function App() {
     setViewerCount
   ] = useState(0);
 
-  /*
-   * Somente produtores REMOTOS.
-   *
-   * A própria transmissão é "local".
-   */
   const [
     producers,
     setProducers
@@ -198,42 +176,52 @@ function App() {
    * producerId -> MediaStream
    */
   const streams =
-    useRef(
-      new Map()
-    );
+    useRef(new Map());
 
   /*
    * producerId -> HTMLVideoElement
    */
   const videoRefs =
-    useRef(
-      new Map()
-    );
+    useRef(new Map());
 
   /*
    * local->viewerId
    * producerId->local
    */
   const peerConnections =
-    useRef(
-      new Map()
-    );
+    useRef(new Map());
 
   /*
    * PeerConnection -> ICE pendente
    */
   const pendingCandidates =
-    useRef(
-      new Map()
-    );
+    useRef(new Map());
 
   /*
-   * Evita solicitações duplicadas.
+   * producerId que estamos tentando
+   * assistir.
    */
   const requestedOffers =
-    useRef(
-      new Set()
-    );
+    useRef(new Set());
+
+  /*
+   * Quantidade de tentativas por produtor.
+   */
+  const negotiationRetries =
+    useRef(new Map());
+
+  /*
+   * Timers de retry.
+   */
+  const retryTimers =
+    useRef(new Map());
+
+  /*
+   * Evita que duas negociações do
+   * mesmo produtor aconteçam simultaneamente.
+   */
+  const negotiatingProducers =
+    useRef(new Set());
 
   const roomId =
     useRef("");
@@ -275,9 +263,7 @@ function App() {
           return;
         }
 
-        setDiscordReady(
-          true
-        );
+        setDiscordReady(true);
 
         setStatus(
           "Conectado ao Discord"
@@ -430,7 +416,7 @@ function App() {
               true
             );
 
-            requestedOffers.current.clear();
+            resetNegotiationState();
 
             setProducers(
               []
@@ -480,7 +466,7 @@ function App() {
               true
             );
 
-            requestedOffers.current.clear();
+            resetNegotiationState();
 
             setProducers(
               []
@@ -534,10 +520,17 @@ function App() {
               limitedList
             );
 
+            /*
+             * Mantém a lista.
+             */
             setProducers(
               limitedList
             );
 
+            /*
+             * Se a transmissão selecionada
+             * não existe mais, troca.
+             */
             setSelectedProducer(
               current => {
 
@@ -566,7 +559,13 @@ function App() {
             );
 
             /*
-             * Solicita todas as transmissões.
+             * IMPORTANTE:
+             *
+             * Tenta assistir todas as
+             * transmissões remotas.
+             *
+             * Se já existe conexão,
+             * requestOffer não recria.
              */
             for (
               const producerId
@@ -604,6 +603,7 @@ function App() {
               producerId ===
               myId.current
             ) {
+
               return;
             }
 
@@ -634,8 +634,12 @@ function App() {
               }
             );
 
+            /*
+             * Nova tentativa.
+             */
             requestOffer(
-              producerId
+              producerId,
+              true
             );
 
             return;
@@ -778,11 +782,11 @@ function App() {
         };
 
       socket.onerror =
-        error => {
+        socketError => {
 
           console.error(
             "WebSocket:",
-            error
+            socketError
           );
 
           setError(
@@ -815,12 +819,35 @@ function App() {
   }
 
   /* =========================================================
+     RESET NEGOTIATION
+  ========================================================= */
+
+  function resetNegotiationState() {
+
+    requestedOffers.current.clear();
+
+    negotiationRetries.current.clear();
+
+    for (
+      const timer
+      of retryTimers.current.values()
+    ) {
+
+      clearTimeout(
+        timer
+      );
+    }
+
+    retryTimers.current.clear();
+
+    negotiatingProducers.current.clear();
+  }
+
+  /* =========================================================
      SEND
   ========================================================= */
 
-  function send(
-    message
-  ) {
+  function send(message) {
 
     if (
       !ws.current ||
@@ -954,7 +981,7 @@ function App() {
 
     cleanupStreams();
 
-    requestedOffers.current.clear();
+    resetNegotiationState();
 
     roomId.current =
       "";
@@ -1018,13 +1045,6 @@ function App() {
       return;
     }
 
-    /*
-     * O limite é de 3 produtores.
-     *
-     * Como producers contém somente
-     * os remotos, se já existirem 3
-     * remotos não podemos iniciar.
-     */
     if (
       producers.length >=
       MAX_PRODUCERS
@@ -1043,24 +1063,6 @@ function App() {
         "Solicitando captura da tela..."
       );
 
-      /*
-       * O navegador mostra a interface
-       * para escolher:
-       *
-       * - tela
-       * - janela
-       * - aba
-       *
-       * shareAudio controla se pedimos
-       * áudio da fonte.
-       *
-       * IMPORTANTE:
-       *
-       * Para não transmitir conversa
-       * do Discord, prefira compartilhar
-       * a janela/aba do aplicativo desejado
-       * e NÃO o áudio do sistema inteiro.
-       */
       const stream =
         await navigator.mediaDevices.getDisplayMedia(
           {
@@ -1079,19 +1081,12 @@ function App() {
               }
             },
 
-            audio:
-              shareAudio
-                ? {
-                    echoCancellation:
-                      false,
-
-                    noiseSuppression:
-                      false,
-
-                    autoGainControl:
-                      false
-                  }
-                : false
+            /*
+             * O navegador mostra a opção
+             * de compartilhar áudio quando
+             * a fonte selecionada suporta isso.
+             */
+            audio: true
           }
         );
 
@@ -1099,32 +1094,6 @@ function App() {
         "Stream local:",
         stream
       );
-
-      /*
-       * Alguns navegadores podem retornar
-       * áudio mesmo quando o usuário não
-       * selecionou áudio.
-       *
-       * Se shareAudio estiver desligado,
-       * removemos qualquer faixa de áudio.
-       */
-      if (!shareAudio) {
-
-        stream
-          .getAudioTracks()
-          .forEach(
-            track => {
-
-              try {
-                track.stop();
-              } catch {}
-
-              stream.removeTrack(
-                track
-              );
-            }
-          );
-      }
 
       localStream.current =
         stream;
@@ -1137,15 +1106,10 @@ function App() {
       setAudioStates(
         current => ({
           ...current,
-          local:
-            false
+          local: false
         })
       );
 
-      /*
-       * Mostra imediatamente
-       * a própria tela.
-       */
       const localVideo =
         videoRefs.current.get(
           "local"
@@ -1159,22 +1123,12 @@ function App() {
         localVideo.muted =
           true;
 
-        localVideo.playsInline =
-          true;
-
-        localVideo.autoplay =
-          true;
-
         localVideo.play()
           .catch(
             () => {}
           );
       }
 
-      /*
-       * Quando o usuário encerra
-       * a captura pelo navegador.
-       */
       const videoTrack =
         stream.getVideoTracks()[0];
 
@@ -1203,48 +1157,13 @@ function App() {
       );
 
       /*
-       * Agora vira produtor.
+       * Registra no servidor somente
+       * depois que a captura deu certo.
        */
-      const sent =
-        send({
-          type:
-            "start-sharing"
-        });
-
-      if (!sent) {
-
-        /*
-         * Se o servidor não estiver
-         * conectado, desfaz a captura.
-         */
-        stream
-          .getTracks()
-          .forEach(
-            track => {
-
-              try {
-                track.stop();
-              } catch {}
-            }
-          );
-
-        localStream.current =
-          null;
-
-        streams.current.delete(
-          "local"
-        );
-
-        setSharing(
-          false
-        );
-
-        setError(
-          "Servidor não está conectado."
-        );
-
-        return;
-      }
+      send({
+        type:
+          "start-sharing"
+      });
 
       setStatus(
         "Você está transmitindo"
@@ -1305,8 +1224,8 @@ function App() {
     );
 
     /*
-     * Fecha conexões onde somos
-     * produtores.
+     * Fecha todas as conexões
+     * nas quais somos produtores.
      */
     for (
       const [
@@ -1430,9 +1349,8 @@ function App() {
       );
 
     /*
-     * Se já temos uma conexão
-     * realmente funcional,
-     * não precisamos de outra.
+     * Se já existe uma conexão funcional,
+     * não precisamos pedir novamente.
      */
     if (
       existing &&
@@ -1446,68 +1364,55 @@ function App() {
         "closed"
     ) {
 
-      console.log(
-        "Conexão já funcionando:",
-        key
-      );
+      return;
+    }
+
+    /*
+     * Se está em negociação e não foi
+     * pedido explicitamente um retry,
+     * não duplica.
+     */
+    if (
+      negotiatingProducers.current.has(
+        producerId
+      ) &&
+      !force
+    ) {
 
       return;
     }
 
     /*
-     * Se morreu, limpa.
+     * Se já pedimos e ainda não houve
+     * falha, não duplica.
      */
     if (
-      existing &&
-      (
-        existing.connectionState ===
-          "failed" ||
-        existing.connectionState ===
-          "disconnected" ||
-        existing.signalingState ===
-          "closed"
-      )
-    ) {
-
-      try {
-        existing.close();
-      } catch {}
-
-      peerConnections.current.delete(
-        key
-      );
-
-      pendingCandidates.current.delete(
-        key
-      );
-    }
-
-    /*
-     * Não repete a solicitação,
-     * exceto quando force=true.
-     */
-    if (
-      !force &&
       requestedOffers.current.has(
         producerId
-      )
+      ) &&
+      !force
     ) {
-
-      console.log(
-        "Offer já solicitada:",
-        producerId
-      );
 
       return;
     }
 
+    /*
+     * Se for retry, permite novamente.
+     */
     requestedOffers.current.add(
+      producerId
+    );
+
+    negotiatingProducers.current.add(
       producerId
     );
 
     console.log(
       "Pedindo transmissão:",
-      producerId
+      producerId,
+      force
+        ? "(retry)"
+        : ""
     );
 
     const sent =
@@ -1518,16 +1423,147 @@ function App() {
         producerId
       });
 
-    /*
-     * Se não conseguiu enviar,
-     * permite tentar novamente.
-     */
     if (!sent) {
 
-      requestedOffers.current.delete(
+      negotiatingProducers.current.delete(
         producerId
       );
     }
+  }
+
+  /* =========================================================
+     RETRY VIEWER
+  ========================================================= */
+
+  function scheduleViewerRetry(
+    producerId
+  ) {
+
+    if (!producerId) {
+      return;
+    }
+
+    /*
+     * Se já existe uma conexão boa,
+     * não faz retry.
+     */
+    const key =
+      `${producerId}->local`;
+
+    const pc =
+      peerConnections.current.get(
+        key
+      );
+
+    if (
+      pc &&
+      (
+        pc.connectionState ===
+          "connected" ||
+        pc.connectionState ===
+          "connecting"
+      ) &&
+      pc.signalingState !==
+        "closed"
+    ) {
+
+      return;
+    }
+
+    const attempts =
+      negotiationRetries.current.get(
+        producerId
+      ) || 0;
+
+    if (
+      attempts >=
+      MAX_NEGOTIATION_RETRIES
+    ) {
+
+      console.warn(
+        "Máximo de retries atingido:",
+        producerId
+      );
+
+      negotiatingProducers.current.delete(
+        producerId
+      );
+
+      return;
+    }
+
+    /*
+     * Incrementa tentativas.
+     */
+    negotiationRetries.current.set(
+      producerId,
+      attempts + 1
+    );
+
+    /*
+     * Remove conexão antiga.
+     */
+    if (pc) {
+
+      try {
+        pc.close();
+      } catch {}
+
+      peerConnections.current.delete(
+        key
+      );
+    }
+
+    pendingCandidates.current.delete(
+      key
+    );
+
+    requestedOffers.current.delete(
+      producerId
+    );
+
+    negotiatingProducers.current.delete(
+      producerId
+    );
+
+    /*
+     * Evita múltiplos timers.
+     */
+    if (
+      retryTimers.current.has(
+        producerId
+      )
+    ) {
+
+      return;
+    }
+
+    console.log(
+      `Agendando retry ${attempts + 1}/${MAX_NEGOTIATION_RETRIES}:`,
+      producerId
+    );
+
+    const timer =
+      setTimeout(
+        () => {
+
+          retryTimers.current.delete(
+            producerId
+          );
+
+          requestOffer(
+            producerId,
+            true
+          );
+
+        },
+        RETRY_DELAY
+      );
+
+    retryTimers.current.set(
+      producerId,
+      timer
+    );
   }
 
   /* =========================================================
@@ -1555,32 +1591,29 @@ function App() {
       );
 
     /*
-     * Se já existe uma conexão viva,
-     * não cria outra.
+     * Só reutiliza conexão realmente
+     * funcional/em andamento.
      */
-    if (
-      existing &&
-      existing.signalingState !==
-        "closed" &&
-      (
-        existing.connectionState ===
-          "connected" ||
-        existing.connectionState ===
-          "connecting" ||
-        existing.connectionState ===
-          "new"
-      )
-    ) {
-
-      console.log(
-        "Peer produtor já existe:",
-        key
-      );
-
-      return;
-    }
-
     if (existing) {
+
+      if (
+        (
+          existing.connectionState ===
+            "connected" ||
+          existing.connectionState ===
+            "connecting"
+        ) &&
+        existing.signalingState !==
+          "closed"
+      ) {
+
+        console.log(
+          "Peer produtor já existe:",
+          key
+        );
+
+        return;
+      }
 
       try {
         existing.close();
@@ -1599,11 +1632,13 @@ function App() {
       await getIceServers();
 
     /*
-     * A transmissão pode ter sido
-     * encerrada enquanto aguardávamos
-     * o TURN.
+     * O usuário pode ter parado
+     * de transmitir enquanto aguardava TURN.
      */
-    if (!localStream.current) {
+    if (
+      !localStream.current
+    ) {
+
       return;
     }
 
@@ -1618,26 +1653,45 @@ function App() {
     );
 
     /*
-     * Vídeo + áudio existente no stream.
-     *
-     * Se shareAudio=false,
-     * o stream só possui vídeo.
+     * Adiciona todos os tracks atuais.
      */
     for (
       const track
       of localStream.current.getTracks()
     ) {
 
-      pc.addTrack(
-        track,
-        localStream.current
-      );
+      try {
+
+        pc.addTrack(
+          track,
+          localStream.current
+        );
+
+      } catch (error) {
+
+        console.warn(
+          "Erro adicionando track:",
+          error
+        );
+      }
     }
 
     pc.onicecandidate =
       ({ candidate }) => {
 
         if (!candidate) {
+          return;
+        }
+
+        /*
+         * Não manda ICE de uma
+         * conexão que já morreu.
+         */
+        if (
+          pc.signalingState ===
+          "closed"
+        ) {
+
           return;
         }
 
@@ -1661,30 +1715,74 @@ function App() {
         console.log(
           "PRODUTOR",
           viewerId,
-          pc.connectionState
+          pc.connectionState,
+          pc.signalingState
         );
+
+        if (
+          pc.connectionState ===
+            "connected"
+        ) {
+
+          /*
+           * Conexão funcionando.
+           */
+          return;
+        }
 
         if (
           pc.connectionState ===
             "failed" ||
           pc.connectionState ===
-            "disconnected" ||
-          pc.connectionState ===
             "closed"
         ) {
 
-          console.warn(
-            "Conexão do produtor perdida:",
+          if (
+            peerConnections.current.get(
+              key
+            ) === pc
+          ) {
+
+            peerConnections.current.delete(
+              key
+            );
+          }
+
+          pendingCandidates.current.delete(
             key
           );
+        }
 
-          try {
-            pc.close();
-          } catch {}
+        /*
+         * disconnected pode se recuperar,
+         * então não fecha imediatamente.
+         */
+      };
 
-          peerConnections.current.delete(
-            key
-          );
+    pc.oniceconnectionstatechange =
+      () => {
+
+        console.log(
+          "PRODUTOR ICE",
+          viewerId,
+          pc.iceConnectionState
+        );
+
+        if (
+          pc.iceConnectionState ===
+            "failed"
+        ) {
+
+          if (
+            peerConnections.current.get(
+              key
+            ) === pc
+          ) {
+
+            peerConnections.current.delete(
+              key
+            );
+          }
 
           pendingCandidates.current.delete(
             key
@@ -1697,6 +1795,10 @@ function App() {
       const offer =
         await pc.createOffer();
 
+      /*
+       * A conexão pode ter sido
+       * fechada enquanto criava offer.
+       */
       if (
         pc.signalingState ===
         "closed"
@@ -1742,9 +1844,16 @@ function App() {
         pc.close();
       } catch {}
 
-      peerConnections.current.delete(
-        key
-      );
+      if (
+        peerConnections.current.get(
+          key
+        ) === pc
+      ) {
+
+        peerConnections.current.delete(
+          key
+        );
+      }
 
       pendingCandidates.current.delete(
         key
@@ -1781,10 +1890,6 @@ function App() {
       return;
     }
 
-    /*
-     * Nunca aceita nossa própria
-     * transmissão.
-     */
     if (
       producerId ===
       myId.current
@@ -1801,45 +1906,65 @@ function App() {
       producerId
     );
 
+    /*
+     * A partir daqui a negociação
+     * realmente começou.
+     */
+    negotiatingProducers.current.add(
+      producerId
+    );
+
+    /*
+     * Se existe uma conexão antiga,
+     * fecha e substitui.
+     *
+     * Isso é importante quando houve
+     * uma negociação quebrada.
+     */
     const old =
       peerConnections.current.get(
         key
       );
 
-    /*
-     * Se a conexão já está viva,
-     * ignora oferta duplicada.
-     */
-    if (
-      old &&
-      old.signalingState !==
-        "closed" &&
-      (
-        old.connectionState ===
-          "connected" ||
-        old.connectionState ===
-          "connecting"
-      )
-    ) {
-
-      console.log(
-        "Conexão já existente:",
-        key
-      );
-
-      return;
-    }
-
     if (old) {
+
+      /*
+       * Se ela já está conectada,
+       * não substitui.
+       */
+      if (
+        old.connectionState ===
+          "connected" &&
+        old.signalingState !==
+          "closed"
+      ) {
+
+        negotiatingProducers.current.delete(
+          producerId
+        );
+
+        return;
+      }
 
       try {
         old.close();
       } catch {}
 
-      peerConnections.current.delete(
-        key
-      );
+      if (
+        peerConnections.current.get(
+          key
+        ) === old
+      ) {
+
+        peerConnections.current.delete(
+          key
+        );
+      }
     }
+
+    pendingCandidates.current.delete(
+      key
+    );
 
     const iceServers =
       await getIceServers();
@@ -1883,17 +2008,18 @@ function App() {
         }
 
         /*
-         * Evita track duplicada.
+         * Não duplica tracks.
          */
-        if (
-          !stream
+        const exists =
+          stream
             .getTracks()
             .some(
               track =>
                 track.id ===
                 event.track.id
-            )
-        ) {
+            );
+
+        if (!exists) {
 
           stream.addTrack(
             event.track
@@ -1901,10 +2027,42 @@ function App() {
         }
 
         /*
-         * Atualiza o vídeo.
+         * Atualiza a lista imediatamente.
+         */
+        setProducers(
+          current => {
+
+            if (
+              current.includes(
+                producerId
+              )
+            ) {
+
+              return current;
+            }
+
+            if (
+              current.length >=
+              MAX_PRODUCERS
+            ) {
+
+              return current;
+            }
+
+            return [
+              ...current,
+              producerId
+            ];
+          }
+        );
+
+        /*
+         * Espera o React montar o vídeo.
          */
         const attachVideo =
-          () => {
+          (
+            attempts = 0
+          ) => {
 
             const video =
               videoRefs.current.get(
@@ -1913,8 +2071,24 @@ function App() {
 
             if (!video) {
 
+              if (
+                attempts >=
+                100
+              ) {
+
+                console.warn(
+                  "Vídeo remoto não encontrado:",
+                  producerId
+                );
+
+                return;
+              }
+
               setTimeout(
-                attachVideo,
+                () =>
+                  attachVideo(
+                    attempts + 1
+                  ),
                 50
               );
 
@@ -1959,43 +2133,20 @@ function App() {
           };
 
         attachVideo();
-
-        /*
-         * Garante que o produtor
-         * esteja na lista.
-         */
-        setProducers(
-          current => {
-
-            if (
-              current.includes(
-                producerId
-              )
-            ) {
-
-              return current;
-            }
-
-            if (
-              current.length >=
-              MAX_PRODUCERS
-            ) {
-
-              return current;
-            }
-
-            return [
-              ...current,
-              producerId
-            ];
-          }
-        );
       };
 
     pc.onicecandidate =
       ({ candidate }) => {
 
         if (!candidate) {
+          return;
+        }
+
+        if (
+          pc.signalingState ===
+          "closed"
+        ) {
+
           return;
         }
 
@@ -2018,109 +2169,176 @@ function App() {
         console.log(
           "VIEWER",
           producerId,
-          pc.connectionState
+          pc.connectionState,
+          pc.signalingState
         );
 
         if (
           pc.connectionState ===
-          "connected"
+            "connected"
         ) {
+
+          /*
+           * SUCESSO!
+           *
+           * Zera os retries.
+           */
+          negotiationRetries.current.delete(
+            producerId
+          );
+
+          requestedOffers.current.add(
+            producerId
+          );
+
+          negotiatingProducers.current.delete(
+            producerId
+          );
+
+          const timer =
+            retryTimers.current.get(
+              producerId
+            );
+
+          if (timer) {
+
+            clearTimeout(
+              timer
+            );
+
+            retryTimers.current.delete(
+              producerId
+            );
+          }
 
           setStatus(
             "Transmissão conectada"
           );
+
+          return;
         }
 
         if (
           pc.connectionState ===
-            "failed" ||
-          pc.connectionState ===
-            "disconnected" ||
-          pc.connectionState ===
-            "closed"
+            "failed"
         ) {
 
           console.warn(
-            "VIEWER: conexão perdida:",
-            producerId,
-            pc.connectionState
+            "WebRTC falhou:",
+            producerId
           );
 
-          try {
-            pc.close();
-          } catch {}
+          if (
+            peerConnections.current.get(
+              key
+            ) === pc
+          ) {
 
-          peerConnections.current.delete(
-            key
-          );
+            peerConnections.current.delete(
+              key
+            );
+          }
 
           pendingCandidates.current.delete(
             key
           );
 
+          negotiatingProducers.current.delete(
+            producerId
+          );
+
           /*
            * IMPORTANTE:
            *
-           * Permite solicitar novamente.
-           *
-           * Isso corrige o caso em que
-           * a primeira pessoa tenta receber
-           * uma transmissão, a conexão falha
-           * e requestedOffers continuava
-           * bloqueando uma nova tentativa.
+           * Permite uma nova request-offer.
            */
           requestedOffers.current.delete(
             producerId
           );
 
-          /*
-           * Pequeno retry.
-           */
-          setTimeout(
-            () => {
+          scheduleViewerRetry(
+            producerId
+          );
+        }
 
-              if (
-                producers.includes(
-                  producerId
-                )
-              ) {
+        if (
+          pc.connectionState ===
+            "closed"
+        ) {
 
-                requestOffer(
-                  producerId,
-                  true
-                );
-              }
+          if (
+            peerConnections.current.get(
+              key
+            ) === pc
+          ) {
 
-            },
-            1000
+            peerConnections.current.delete(
+              key
+            );
+          }
+
+          pendingCandidates.current.delete(
+            key
+          );
+
+          negotiatingProducers.current.delete(
+            producerId
+          );
+        }
+      };
+
+    pc.oniceconnectionstatechange =
+      () => {
+
+        console.log(
+          "VIEWER ICE",
+          producerId,
+          pc.iceConnectionState
+        );
+
+        if (
+          pc.iceConnectionState ===
+            "failed"
+        ) {
+
+          if (
+            peerConnections.current.get(
+              key
+            ) === pc
+          ) {
+
+            peerConnections.current.delete(
+              key
+            );
+          }
+
+          pendingCandidates.current.delete(
+            key
+          );
+
+          requestedOffers.current.delete(
+            producerId
+          );
+
+          negotiatingProducers.current.delete(
+            producerId
+          );
+
+          scheduleViewerRetry(
+            producerId
           );
         }
       };
 
     try {
 
-      if (
-        pc.signalingState ===
-        "closed"
-      ) {
-
-        return;
-      }
-
       await pc.setRemoteDescription(
         msg.offer
       );
 
-      if (
-        pc.signalingState ===
-        "closed"
-      ) {
-
-        return;
-      }
-
       /*
-       * ICE que chegou antes da offer.
+       * Agora podemos adicionar os
+       * ICE que chegaram antes.
        */
       await flushPendingCandidates(
         key
@@ -2173,15 +2391,33 @@ function App() {
         pc.close();
       } catch {}
 
-      peerConnections.current.delete(
-        key
-      );
+      if (
+        peerConnections.current.get(
+          key
+        ) === pc
+      ) {
+
+        peerConnections.current.delete(
+          key
+        );
+      }
 
       pendingCandidates.current.delete(
         key
       );
 
       requestedOffers.current.delete(
+        producerId
+      );
+
+      negotiatingProducers.current.delete(
+        producerId
+      );
+
+      /*
+       * Tenta novamente.
+       */
+      scheduleViewerRetry(
         producerId
       );
     }
@@ -2216,7 +2452,7 @@ function App() {
     if (!pc) {
 
       console.warn(
-        "Peer não encontrado:",
+        "Peer produtor não encontrado:",
         key
       );
 
@@ -2234,8 +2470,8 @@ function App() {
     try {
 
       /*
-       * A answer só pode ser aplicada
-       * quando temos uma local offer.
+       * Answer somente é válida
+       * depois de have-local-offer.
        */
       if (
         pc.signalingState !==
@@ -2244,6 +2480,7 @@ function App() {
 
         console.warn(
           "Estado inesperado para answer:",
+          key,
           pc.signalingState
         );
 
@@ -2265,13 +2502,24 @@ function App() {
         error
       );
 
+      try {
+        pc.close();
+      } catch {}
+
       if (
-        error?.name ===
-        "InvalidStateError"
+        peerConnections.current.get(
+          key
+        ) === pc
       ) {
 
-        return;
+        peerConnections.current.delete(
+          key
+        );
       }
+
+      pendingCandidates.current.delete(
+        key
+      );
     }
   }
 
@@ -2311,13 +2559,17 @@ function App() {
     }
 
     /*
-     * Nós somos viewer.
+     * Nós somos viewer:
+     *
+     * producer -> local
      */
     const viewerKey =
       `${producerId}->local`;
 
     /*
-     * Nós somos produtor.
+     * Nós somos produtor:
+     *
+     * local -> viewer
      */
     const producerKey =
       `local->${from}`;
@@ -2329,7 +2581,8 @@ function App() {
       null;
 
     /*
-     * Primeiro procura viewer.
+     * Primeiro tenta encontrar
+     * nossa conexão de viewer.
      */
     if (
       peerConnections.current.has(
@@ -2347,7 +2600,7 @@ function App() {
     }
 
     /*
-     * Depois produtor.
+     * Depois tenta conexão de produtor.
      */
     else if (
       peerConnections.current.has(
@@ -2367,13 +2620,26 @@ function App() {
     /*
      * Ainda não existe PeerConnection.
      *
-     * Guarda o ICE.
+     * Guarda ICE.
      */
     if (!pc) {
 
+      /*
+       * Determina o lado correto.
+       *
+       * Se a origem é um produtor remoto,
+       * nós somos viewer.
+       *
+       * Caso contrário, somos produtor.
+       */
       key =
         key ||
-        viewerKey;
+        (
+          producerId !==
+          myId.current
+            ? viewerKey
+            : producerKey
+        );
 
       if (
         !pendingCandidates.current.has(
@@ -2397,23 +2663,17 @@ function App() {
     }
 
     /*
-     * Não adiciona ICE em conexão morta.
+     * Conexão fechada.
      */
     if (
       pc.signalingState ===
         "closed" ||
       pc.connectionState ===
-        "closed" ||
-      pc.connectionState ===
-        "failed"
+        "closed"
     ) {
 
       console.warn(
-        "ICE ignorado: PeerConnection inválida:",
-        key
-      );
-
-      pendingCandidates.current.delete(
+        "ICE ignorado: conexão fechada.",
         key
       );
 
@@ -2421,7 +2681,7 @@ function App() {
     }
 
     /*
-     * Ainda não temos RemoteDescription.
+     * Ainda não temos descrição remota.
      */
     if (
       !pc.remoteDescription
@@ -2458,13 +2718,11 @@ function App() {
 
       if (
         error?.name ===
-          "InvalidStateError" ||
-        error?.name ===
-          "OperationError"
+        "InvalidStateError"
       ) {
 
         console.warn(
-          "ICE descartado:",
+          "ICE ignorado: PeerConnection fechada.",
           key
         );
 
@@ -2497,11 +2755,7 @@ function App() {
 
     if (
       pc.signalingState ===
-        "closed" ||
-      pc.connectionState ===
-        "closed" ||
-      pc.connectionState ===
-        "failed"
+      "closed"
     ) {
 
       return;
@@ -2527,9 +2781,6 @@ function App() {
       return;
     }
 
-    /*
-     * Remove antes de processar.
-     */
     pendingCandidates.current.delete(
       key
     );
@@ -2541,11 +2792,7 @@ function App() {
 
       if (
         pc.signalingState ===
-          "closed" ||
-        pc.connectionState ===
-          "closed" ||
-        pc.connectionState ===
-          "failed"
+        "closed"
       ) {
 
         return;
@@ -2561,9 +2808,7 @@ function App() {
 
         if (
           error?.name ===
-            "InvalidStateError" ||
-          error?.name ===
-            "OperationError"
+          "InvalidStateError"
         ) {
 
           continue;
@@ -2593,6 +2838,30 @@ function App() {
     requestedOffers.current.delete(
       producerId
     );
+
+    negotiatingProducers.current.delete(
+      producerId
+    );
+
+    negotiationRetries.current.delete(
+      producerId
+    );
+
+    const timer =
+      retryTimers.current.get(
+        producerId
+      );
+
+    if (timer) {
+
+      clearTimeout(
+        timer
+      );
+
+      retryTimers.current.delete(
+        producerId
+      );
+    }
 
     /*
      * Fecha PeerConnection.
@@ -2678,7 +2947,7 @@ function App() {
 
     /*
      * Se estava selecionado,
-     * escolhe outra.
+     * seleciona outro.
      */
     setSelectedProducer(
       current => {
@@ -2830,6 +3099,25 @@ function App() {
   function cleanupStreams() {
 
     /*
+     * Cancela retries.
+     */
+    for (
+      const timer
+      of retryTimers.current.values()
+    ) {
+
+      clearTimeout(
+        timer
+      );
+    }
+
+    retryTimers.current.clear();
+
+    negotiationRetries.current.clear();
+
+    negotiatingProducers.current.clear();
+
+    /*
      * Stream local.
      */
     if (
@@ -2901,8 +3189,10 @@ function App() {
     ) {
 
       try {
+
         video.srcObject =
           null;
+
       } catch {}
     }
 
@@ -2984,12 +3274,6 @@ function App() {
 
     element.volume =
       1;
-
-    element.playsInline =
-      true;
-
-    element.autoplay =
-      true;
   }
 
   /* =========================================================
@@ -3133,10 +3417,6 @@ function App() {
 
         <section className="room-layout">
 
-          {/* =================================================
-              TOPBAR
-          ================================================= */}
-
           <header className="room-bar">
 
             <div className="room-info">
@@ -3187,15 +3467,7 @@ function App() {
 
           </header>
 
-          {/* =================================================
-              CONTENT
-          ================================================= */}
-
           <div className="broadcast-layout">
-
-            {/* =================================================
-                MAIN VIDEO
-            ================================================= */}
 
             <section className="main-stage">
 
@@ -3234,6 +3506,7 @@ function App() {
                         </h2>
 
                       </div>
+
                     )
 
                   ) : (
@@ -3257,6 +3530,7 @@ function App() {
                         )
                       }
                     />
+
                   )}
 
                   <div className="main-overlay">
@@ -3308,13 +3582,10 @@ function App() {
                   </p>
 
                 </div>
+
               )}
 
             </section>
-
-            {/* =================================================
-                SIDEBAR
-            ================================================= */}
 
             <aside className="streams-sidebar">
 
@@ -3448,58 +3719,23 @@ function App() {
                     </p>
 
                   </div>
+
                 )}
 
               </div>
-
-              {/* =================================================
-                  CONTROLES
-              ================================================= */}
 
               <div className="controls">
 
                 {!sharing ? (
 
-                  <>
-                    <label className="audio-option">
-
-                      <input
-                        type="checkbox"
-                        checked={
-                          shareAudio
-                        }
-                        onChange={
-                          event =>
-                            setShareAudio(
-                              event.target.checked
-                            )
-                        }
-                      />
-
-                      <span>
-                        🔊 Compartilhar áudio
-                      </span>
-
-                    </label>
-
-                    <div className="audio-warning">
-                      Para evitar transmitir
-                      conversas do Discord,
-                      compartilhe a janela ou
-                      aba do aplicativo desejado
-                      em vez do áudio do sistema
-                      inteiro.
-                    </div>
-
-                    <button
-                      className="share-button"
-                      onClick={
-                        startSharing
-                      }
-                    >
-                      🖥️ Compartilhar tela
-                    </button>
-                  </>
+                  <button
+                    className="share-button"
+                    onClick={
+                      startSharing
+                    }
+                  >
+                    🖥️ Compartilhar tela
+                  </button>
 
                 ) : (
 
@@ -3511,6 +3747,7 @@ function App() {
                   >
                     ■ Parar transmissão
                   </button>
+
                 )}
 
                 <div className="limit-info">
@@ -3539,6 +3776,7 @@ function App() {
           </div>
 
         </section>
+
       )}
 
     </main>

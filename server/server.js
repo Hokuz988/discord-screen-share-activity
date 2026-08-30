@@ -54,8 +54,7 @@ app.get(
   (_, res) => {
 
     res.json({
-      ok:
-        true,
+      ok: true,
 
       service:
         "ScreenCast Signaling Server",
@@ -71,8 +70,7 @@ app.get(
   (_, res) => {
 
     res.json({
-      ok:
-        true,
+      ok: true,
 
       service:
         "screencast-signaling",
@@ -194,11 +192,21 @@ function send(
       1
   ) {
 
-    ws.send(
-      JSON.stringify(
-        message
-      )
-    );
+    try {
+
+      ws.send(
+        JSON.stringify(
+          message
+        )
+      );
+
+    } catch (error) {
+
+      console.error(
+        "Erro enviando WebSocket:",
+        error
+      );
+    }
   }
 }
 
@@ -285,9 +293,6 @@ function viewerCount(
     return 0;
   }
 
-  /*
-   * Clientes que não são produtores.
-   */
   return Math.max(
     0,
     room.clients.size -
@@ -388,23 +393,6 @@ function createRoomCode() {
 }
 
 /* =========================================================
-   VALIDAR CLIENTE / SALA
-========================================================= */
-
-function isInRoom(
-  ws,
-  room
-) {
-
-  return Boolean(
-    ws &&
-    room &&
-    ws.room === room &&
-    room.clients.has(ws)
-  );
-}
-
-/* =========================================================
    REMOVER PRODUTOR
 ========================================================= */
 
@@ -442,6 +430,10 @@ function removeProducer(
 
   if (notify) {
 
+    /*
+     * Primeiro avisa que o produtor
+     * deixou de existir.
+     */
     broadcast(
       room,
       {
@@ -454,6 +446,9 @@ function removeProducer(
       ws
     );
 
+    /*
+     * Depois atualiza a lista.
+     */
     updateProducerList(
       room
     );
@@ -579,7 +574,7 @@ wss.on(
     );
 
     /*
-     * Envia ID imediatamente.
+     * Entrega ID para o cliente.
      */
     send(
       ws,
@@ -664,9 +659,6 @@ wss.on(
 
           ws.room =
             room;
-
-          ws.isProducer =
-            false;
 
           send(
             ws,
@@ -775,9 +767,6 @@ wss.on(
           ws.room =
             room;
 
-          ws.isProducer =
-            false;
-
           send(
             ws,
             {
@@ -789,8 +778,11 @@ wss.on(
           );
 
           /*
-           * Primeiro envia a lista
-           * diretamente para o novo cliente.
+           * MUITO IMPORTANTE:
+           *
+           * O novo cliente recebe
+           * imediatamente todos os
+           * produtores existentes.
            */
           send(
             ws,
@@ -819,7 +811,9 @@ wss.on(
           );
 
           /*
-           * Depois atualiza os outros.
+           * Os clientes antigos também
+           * precisam saber que a composição
+           * da sala mudou.
            */
           broadcast(
             room,
@@ -892,12 +886,7 @@ wss.on(
           const room =
             ws.room;
 
-          if (
-            !isInRoom(
-              ws,
-              room
-            )
-          ) {
+          if (!room) {
 
             send(
               ws,
@@ -914,7 +903,7 @@ wss.on(
           }
 
           /*
-           * Já transmite.
+           * Já é produtor.
            */
           if (
             room.producers.has(
@@ -959,7 +948,7 @@ wss.on(
           }
 
           /*
-           * Registra UMA vez.
+           * REGISTRA UMA ÚNICA VEZ.
            */
           room.producers.set(
             ws.id,
@@ -989,7 +978,11 @@ wss.on(
           );
 
           /*
-           * Atualiza lista.
+           * Atualiza a lista completa.
+           *
+           * Isso é importante porque
+           * clientes antigos precisam
+           * descobrir o novo produtor.
            */
           updateProducerList(
             room
@@ -1030,13 +1023,7 @@ wss.on(
           const room =
             ws.room;
 
-          if (
-            !isInRoom(
-              ws,
-              room
-            )
-          ) {
-
+          if (!room) {
             return;
           }
 
@@ -1051,8 +1038,8 @@ wss.on(
           }
 
           /*
-           * Produtor precisa existir
-           * nessa sala.
+           * Verifica se produtor
+           * realmente pertence à sala.
            */
           const producer =
             room.producers.get(
@@ -1076,8 +1063,7 @@ wss.on(
           }
 
           /*
-           * Nunca pede nossa própria
-           * transmissão.
+           * Nunca pede própria transmissão.
            */
           if (
             producer.id ===
@@ -1087,9 +1073,13 @@ wss.on(
             return;
           }
 
+          console.log(
+            `[SIGNAL] ${ws.id} pediu offer de ${producer.id}`
+          );
+
           /*
-           * Envia pedido diretamente
-           * ao produtor.
+           * Manda diretamente para
+           * o produtor.
            */
           send(
             producer,
@@ -1117,31 +1107,7 @@ wss.on(
           const room =
             ws.room;
 
-          if (
-            !isInRoom(
-              ws,
-              room
-            )
-          ) {
-
-            return;
-          }
-
-          /*
-           * Apenas produtor registrado
-           * pode enviar offer.
-           */
-          if (
-            !room.producers.has(
-              ws.id
-            )
-          ) {
-
-            console.warn(
-              "Offer rejeitada: cliente não é produtor.",
-              ws.id
-            );
-
+          if (!room) {
             return;
           }
 
@@ -1164,20 +1130,34 @@ wss.on(
           if (!target) {
 
             console.warn(
-              "Offer: target não encontrado:",
+              "Target da offer não encontrado:",
               targetId
             );
 
             return;
           }
 
+          /*
+           * Somente produtor pode
+           * mandar offer.
+           */
           if (
-            target ===
-            ws
+            !room.producers.has(
+              ws.id
+            )
           ) {
+
+            console.warn(
+              "Offer rejeitada: cliente não é produtor.",
+              ws.id
+            );
 
             return;
           }
+
+          console.log(
+            `[SIGNAL] OFFER ${ws.id} -> ${target.id}`
+          );
 
           send(
             target,
@@ -1211,13 +1191,7 @@ wss.on(
           const room =
             ws.room;
 
-          if (
-            !isInRoom(
-              ws,
-              room
-            )
-          ) {
-
+          if (!room) {
             return;
           }
 
@@ -1238,16 +1212,18 @@ wss.on(
             );
 
           if (!target) {
-            return;
-          }
 
-          if (
-            target ===
-            ws
-          ) {
+            console.warn(
+              "Target da answer não encontrado:",
+              targetId
+            );
 
             return;
           }
+
+          console.log(
+            `[SIGNAL] ANSWER ${ws.id} -> ${target.id}`
+          );
 
           send(
             target,
@@ -1281,13 +1257,7 @@ wss.on(
           const room =
             ws.room;
 
-          if (
-            !isInRoom(
-              ws,
-              room
-            )
-          ) {
-
+          if (!room) {
             return;
           }
 
@@ -1308,24 +1278,14 @@ wss.on(
             );
 
           if (!target) {
-            return;
-          }
-
-          if (
-            target ===
-            ws
-          ) {
 
             return;
           }
 
           /*
-           * Só permite ICE relacionado
-           * a uma transmissão existente
-           * quando o remetente é produtor.
-           *
-           * Para ICE de viewer -> produtor,
-           * o producerId identifica o produtor.
+           * Verifica se a conexão
+           * pertence a uma transmissão
+           * válida.
            */
           const producerId =
             String(
@@ -1337,40 +1297,18 @@ wss.on(
             return;
           }
 
-          /*
-           * Se o remetente é produtor,
-           * ele precisa ser o producerId.
-           */
-          if (
-            room.producers.has(
-              ws.id
-            ) &&
-            producerId !==
-              ws.id
-          ) {
-
-            console.warn(
-              "ICE rejeitado: producerId inválido."
-            );
-
-            return;
-          }
-
-          /*
-           * Se o remetente não é produtor,
-           * o producerId precisa existir.
-           */
           if (
             !room.producers.has(
               producerId
             )
           ) {
 
-            console.warn(
-              "ICE rejeitado: produtor inexistente.",
-              producerId
-            );
-
+            /*
+             * Pode ser um ICE de uma
+             * conexão que acabou de morrer.
+             *
+             * Ignora sem derrubar WebSocket.
+             */
             return;
           }
 
@@ -1412,10 +1350,6 @@ wss.on(
         );
       }
     );
-
-    /* =====================================================
-       ERROR
-    ===================================================== */
 
     ws.on(
       "error",
