@@ -12,7 +12,7 @@ body,
 
 body {
   font-family: Arial, sans-serif;
-  background: #111214;
+  background: #0b0c0e;
   color: #ffffff;
 }
 
@@ -31,8 +31,8 @@ button {
 
 .app {
   width: 100%;
-  min-height: 100%;
-  padding: 24px;
+  min-height: 100vh;
+  padding: 18px;
 }
 
 /* =========================================================
@@ -40,18 +40,28 @@ button {
 ========================================================= */
 
 .topbar {
+  max-width: 1700px;
+
+  margin: 0 auto 14px;
+
   display: flex;
   align-items: center;
   justify-content: space-between;
+
   gap: 20px;
-  margin-bottom: 24px;
 }
 
 .eyebrow {
-  font-size: 11px;
+  display: block;
+
+  margin-bottom: 3px;
+
+  font-size: 10px;
   font-weight: 700;
+
   letter-spacing: 2px;
-  opacity: 0.55;
+
+  color: #949ba4;
 }
 
 h1,
@@ -62,49 +72,63 @@ p {
 
 h1 {
   margin-bottom: 0;
-  font-size: 28px;
+
+  font-size: 26px;
 }
 
 .status {
   display: flex;
   align-items: center;
+
   gap: 8px;
+
   font-size: 13px;
-  opacity: 0.75;
+
+  color: #b5bac1;
 }
 
 .dot {
   width: 9px;
   height: 9px;
+
+  flex-shrink: 0;
+
   border-radius: 50%;
+
   background: #666;
 }
 
 .dot.on {
   background: #23d47a;
-  box-shadow: 0 0 10px rgba(35, 212, 122, 0.6);
+
+  box-shadow:
+    0 0 10px rgba(35, 212, 122, 0.6);
 }
 
 /* =========================================================
-   SALA — MENU
+   ROOM MENU
 ========================================================= */
 
 .room-menu {
   width: min(460px, 100%);
-  margin: 80px auto 0;
+
+  margin: 100px auto 0;
+
   padding: 32px;
 
   border: 1px solid #292b30;
+
   border-radius: 18px;
 
   background: #18191c;
 
   box-shadow:
-    0 20px 60px rgba(0, 0, 0, 0.25);
+    0 20px 60px rgba(0, 0, 0, 0.35);
 }
 
 .room-menu h2 {
   margin-bottom: 8px;
+
   font-size: 26px;
 }
 
@@ -113,13 +137,18 @@ h1 {
 }
 
 /* =========================================================
-   JOIN BOX
+   JOIN
 ========================================================= */
 
 .join-box {
   display: grid;
-  grid-template-columns: 1fr 100px;
+
+  grid-template-columns:
+    minmax(0, 1fr)
+    100px;
+
   gap: 10px;
+
   margin-top: 12px;
 }
 
@@ -129,13 +158,17 @@ h1 {
   padding: 13px 14px;
 
   border: 1px solid #35373c;
+
   border-radius: 10px;
+
   outline: none;
 
   background: #111214;
+
   color: white;
 
   text-align: center;
+
   text-transform: uppercase;
 
   transition:
@@ -145,6 +178,7 @@ h1 {
 
 .join-box input::placeholder {
   color: #777b83;
+
   text-transform: none;
 }
 
@@ -152,14 +186,17 @@ h1 {
   border-color: #5865f2;
 
   box-shadow:
-    0 0 0 3px rgba(88, 101, 242, 0.12);
+    0 0 0 3px
+    rgba(88, 101, 242, 0.12);
 }
 
 .join-box button {
   border: 0;
+
   border-radius: 10px;
 
   background: #2b2d31;
+
   color: white;
 
   font-weight: 700;
@@ -182,18 +219,21 @@ h1 {
 ========================================================= */
 
 .room-bar {
-  max-width: 1400px;
-  margin: 0 auto 20px;
+  max-width: 1700px;
 
-  padding: 14px 18px;
+  margin: 0 auto 12px;
+
+  padding: 10px 14px;
 
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 20px;
+
+  gap: 16px;
 
   border: 1px solid #292b30;
-  border-radius: 14px;
+
+  border-radius: 12px;
 
   background: #18191c;
 }
@@ -201,39 +241,61 @@ h1 {
 .room-bar > div {
   display: flex;
   align-items: center;
-  gap: 12px;
+
+  gap: 10px;
 }
 
 .room-bar span {
   color: #777b83;
+
   font-size: 10px;
+
   font-weight: 700;
+
   letter-spacing: 1.5px;
 }
 
 .room-bar strong {
-  padding: 7px 12px;
+  padding: 6px 10px;
 
-  border-radius: 8px;
+  border-radius: 7px;
 
   background: #111214;
 
-  color: #ffffff;
+  font-size: 14px;
 
-  font-size: 15px;
   letter-spacing: 3px;
+}
+
+.room-actions {
+  display: flex;
+
+  align-items: center;
+
+  gap: 12px;
+}
+
+.stream-count {
+  color: #949ba4 !important;
+
+  font-size: 12px !important;
+
+  letter-spacing: 0 !important;
 }
 
 .room-bar button {
   border: 0;
+
   border-radius: 8px;
 
-  padding: 9px 14px;
+  padding: 8px 13px;
 
   background: #2b2d31;
+
   color: white;
 
   font-size: 13px;
+
   font-weight: 700;
 
   transition:
@@ -254,42 +316,235 @@ h1 {
 ========================================================= */
 
 .stage {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
+  width: 100%;
 
-  gap: 20px;
+  max-width: 1700px;
 
-  max-width: 1400px;
   margin: 0 auto;
+
+  display: grid;
+
+  grid-template-columns:
+    minmax(0, 1fr)
+    270px;
+
+  gap: 12px;
+
+  align-items: start;
 }
 
 /* =========================================================
-   VIDEO
+   VIDEO AREA
 ========================================================= */
 
-.video-card {
+.video-area {
   position: relative;
+
+  width: 100%;
+
+  height:
+    calc(100vh - 125px);
 
   min-height: 500px;
 
   overflow: hidden;
 
-  border-radius: 16px;
+  border:
+    1px solid #292b30;
 
-  background: #08090a;
+  border-radius: 13px;
 
-  border: 1px solid #292b30;
-
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  background: #050506;
 }
 
-.video-card video {
+/* =========================================================
+   STREAM LAYOUT
+========================================================= */
+
+.stream-layout {
   width: 100%;
   height: 100%;
 
-  min-height: 500px;
+  display: grid;
+
+  grid-template-columns:
+    minmax(0, 1fr)
+    250px;
+
+  gap: 8px;
+
+  padding: 8px;
+}
+
+/* =========================================================
+   MAIN STREAM
+========================================================= */
+
+.main-stream {
+  position: relative;
+
+  min-width: 0;
+  min-height: 0;
+
+  overflow: hidden;
+
+  border-radius: 9px;
+
+  background: #000;
+
+  cursor: pointer;
+}
+
+.main-stream:hover
+.remote-video {
+  filter: brightness(1.05);
+}
+
+.remote-video {
+  width: 100%;
+  height: 100%;
+
+  display: block;
+
+  object-fit: contain;
+
+  background: #000;
+
+  transition:
+    filter 0.2s;
+}
+
+.remote-video.large {
+  width: 100%;
+  height: 100%;
+}
+
+/* =========================================================
+   MINI STREAMS
+========================================================= */
+
+.stream-sidebar {
+  min-width: 0;
+
+  min-height: 0;
+
+  overflow-y: auto;
+
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 8px;
+}
+
+.mini-stream {
+  position: relative;
+
+  width: 100%;
+
+  aspect-ratio: 16 / 9;
+
+  flex-shrink: 0;
+
+  overflow: hidden;
+
+  border:
+    2px solid transparent;
+
+  border-radius: 9px;
+
+  background: #000;
+
+  cursor: pointer;
+
+  transition:
+    border-color 0.2s,
+    transform 0.15s;
+}
+
+.mini-stream:hover {
+  border-color: #5865f2;
+
+  transform: scale(1.01);
+}
+
+.mini-stream .remote-video {
+  width: 100%;
+  height: 100%;
+
+  object-fit: contain;
+}
+
+/* =========================================================
+   STREAM LABEL
+========================================================= */
+
+.stream-label {
+  position: absolute;
+
+  left: 12px;
+  bottom: 12px;
+
+  padding: 6px 9px;
+
+  border-radius: 6px;
+
+  background:
+    rgba(0, 0, 0, 0.72);
+
+  backdrop-filter: blur(8px);
+
+  font-size: 11px;
+
+  font-weight: 700;
+
+  pointer-events: none;
+}
+
+.live-dot {
+  color: #ed4245;
+
+  margin-right: 5px;
+}
+
+.mini-label {
+  position: absolute;
+
+  left: 7px;
+  bottom: 7px;
+
+  padding: 4px 6px;
+
+  border-radius: 5px;
+
+  background:
+    rgba(0, 0, 0, 0.7);
+
+  font-size: 9px;
+
+  font-weight: 700;
+
+  color: white;
+
+  pointer-events: none;
+}
+
+/* =========================================================
+   LOCAL ONLY
+========================================================= */
+
+.local-only {
+  position: relative;
+
+  width: 100%;
+  height: 100%;
+
+  background: #000;
+}
+
+.local-only video {
+  width: 100%;
+  height: 100%;
 
   display: block;
 
@@ -298,38 +553,33 @@ h1 {
   background: #000;
 }
 
-.live-badge {
-  position: absolute;
-
-  top: 16px;
-  left: 16px;
-
-  padding: 7px 10px;
-
-  border-radius: 8px;
-
-  background: rgba(0, 0, 0, 0.7);
-
-  font-size: 12px;
-  font-weight: 700;
-
-  backdrop-filter: blur(6px);
-}
+/* =========================================================
+   EMPTY
+========================================================= */
 
 .empty {
-  text-align: center;
+  position: absolute;
 
-  max-width: 420px;
+  inset: 0;
+
+  display: flex;
+
+  flex-direction: column;
+
+  align-items: center;
+  justify-content: center;
+
+  text-align: center;
 
   padding: 40px;
 
-  opacity: 0.65;
+  opacity: 0.6;
 }
 
 .screen-icon {
-  font-size: 48px;
+  margin-bottom: 18px;
 
-  margin-bottom: 20px;
+  font-size: 52px;
 }
 
 .empty h2 {
@@ -337,7 +587,11 @@ h1 {
 }
 
 .empty p {
+  max-width: 400px;
+
   margin: 0;
+
+  color: #a8abb2;
 
   line-height: 1.5;
 }
@@ -347,13 +601,16 @@ h1 {
 ========================================================= */
 
 .panel {
-  border: 1px solid #292b30;
+  width: 100%;
+
+  border:
+    1px solid #292b30;
+
+  border-radius: 13px;
+
+  padding: 19px;
 
   background: #18191c;
-
-  border-radius: 16px;
-
-  padding: 24px;
 }
 
 .panel h2 {
@@ -377,9 +634,9 @@ h1 {
 
   border: 0;
 
-  border-radius: 10px;
+  border-radius: 9px;
 
-  padding: 13px 16px;
+  padding: 12px 15px;
 
   font-weight: 700;
 
@@ -393,6 +650,7 @@ h1 {
 
 .primary {
   background: #5865f2;
+
   color: white;
 }
 
@@ -408,6 +666,7 @@ h1 {
 
 .secondary {
   background: #2b2d31;
+
   color: white;
 }
 
@@ -417,6 +676,7 @@ h1 {
 
 .danger {
   background: #da373c;
+
   color: white;
 }
 
@@ -431,33 +691,35 @@ h1 {
 .stats {
   display: grid;
 
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns:
+    1fr
+    1fr;
 
-  gap: 10px;
+  gap: 8px;
 
-  margin-top: 20px;
+  margin-top: 17px;
 }
 
 .stats > div {
-  padding: 14px;
+  padding: 12px;
 
   background: #111214;
 
-  border-radius: 10px;
+  border-radius: 8px;
 }
 
 .stats strong {
   display: block;
 
-  font-size: 20px;
-
   margin-bottom: 4px;
+
+  font-size: 19px;
 }
 
 .stats span {
   color: #949ba4;
 
-  font-size: 12px;
+  font-size: 11px;
 }
 
 /* =========================================================
@@ -465,19 +727,42 @@ h1 {
 ========================================================= */
 
 .error {
-  margin-top: 15px;
+  margin-top: 14px;
 
-  padding: 12px;
+  padding: 11px;
 
   border-radius: 8px;
 
-  background: rgba(218, 55, 60, 0.15);
+  background:
+    rgba(218, 55, 60, 0.15);
 
-  border: 1px solid rgba(218, 55, 60, 0.4);
+  border:
+    1px solid
+    rgba(218, 55, 60, 0.4);
 
   color: #ff8a8f;
 
-  font-size: 13px;
+  font-size: 12px;
+}
+
+/* =========================================================
+   HINT
+========================================================= */
+
+.hint {
+  margin-top: 18px;
+
+  padding: 11px;
+
+  border-radius: 8px;
+
+  background: #111214;
+
+  color: #949ba4;
+
+  font-size: 11px;
+
+  line-height: 1.5;
 }
 
 /* =========================================================
@@ -487,7 +772,7 @@ h1 {
 small {
   display: block;
 
-  margin-top: 20px;
+  margin-top: 17px;
 
   color: #777b83;
 
@@ -495,89 +780,162 @@ small {
 }
 
 /* =========================================================
-   ROOM CODE
+   SCROLLBAR
 ========================================================= */
 
-.room-code {
-  margin: 16px 0;
+.stream-sidebar::-webkit-scrollbar {
+  width: 6px;
+}
 
-  padding: 14px;
+.stream-sidebar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.stream-sidebar::-webkit-scrollbar-thumb {
+  background: #2b2d31;
 
   border-radius: 10px;
-
-  background: #111214;
-
-  text-align: center;
 }
 
-.room-code span {
-  display: block;
-
-  margin-bottom: 4px;
-
-  color: #777b83;
-
-  font-size: 10px;
-
-  font-weight: 700;
-
-  letter-spacing: 1.5px;
+.stream-sidebar::-webkit-scrollbar-thumb:hover {
+  background: #34373c;
 }
 
-.room-code strong {
-  font-size: 26px;
+/* =========================================================
+   TABLET
+========================================================= */
 
-  letter-spacing: 4px;
+@media (max-width: 1150px) {
+
+  .stage {
+    grid-template-columns: 1fr;
+  }
+
+  .panel {
+    display: grid;
+
+    grid-template-columns:
+      1fr
+      1fr;
+
+    gap: 12px;
+  }
+
+  .panel h2,
+  .panel > .muted {
+    grid-column: 1 / -1;
+  }
+
+  .panel .stats {
+    margin-top: 12px;
+  }
+
+  .panel small {
+    grid-column: 1 / -1;
+  }
+
+  .panel .error,
+  .panel .hint {
+    grid-column: 1 / -1;
+  }
+}
+
+/* =========================================================
+   TELAS MENORES
+========================================================= */
+
+@media (max-width: 850px) {
+
+  .app {
+    padding: 12px;
+  }
+
+  .topbar {
+    align-items: flex-start;
+
+    flex-direction: column;
+
+    margin-bottom: 12px;
+  }
+
+  .video-area {
+    height: 65vh;
+
+    min-height: 400px;
+  }
+
+  .stream-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .stream-sidebar {
+    height: 110px;
+
+    flex-direction: row;
+
+    overflow-x: auto;
+
+    overflow-y: hidden;
+  }
+
+  .mini-stream {
+    width: 180px;
+
+    aspect-ratio: 16 / 9;
+  }
+
+  .room-bar {
+    align-items: flex-start;
+
+    flex-direction: column;
+  }
+
+  .room-actions {
+    width: 100%;
+
+    justify-content: space-between;
+  }
 }
 
 /* =========================================================
    MOBILE
 ========================================================= */
 
-@media (max-width: 800px) {
-
-  .app {
-    padding: 16px;
-  }
-
-  .stage {
-    grid-template-columns: 1fr;
-  }
-
-  .video-card {
-    min-height: 350px;
-  }
-
-  .video-card video {
-    min-height: 350px;
-  }
-
-  .topbar {
-    align-items: flex-start;
-    flex-direction: column;
-  }
+@media (max-width: 600px) {
 
   .room-menu {
     margin-top: 40px;
+
     padding: 24px;
   }
 
-  .room-bar {
-    align-items: flex-start;
-    flex-direction: column;
+  .video-area {
+    height: 60vh;
+
+    min-height: 330px;
+
+    border-radius: 10px;
   }
 
-  .room-bar > div {
-    width: 100%;
-    justify-content: space-between;
+  .stream-layout {
+    padding: 5px;
+
+    gap: 5px;
   }
 
-  .room-bar button {
-    width: 100%;
-  }
-}
+  .stream-sidebar {
+    height: 90px;
 
-@media (max-width: 480px) {
+    gap: 5px;
+  }
+
+  .mini-stream {
+    width: 145px;
+  }
+
+  .panel {
+    display: block;
+  }
 
   .join-box {
     grid-template-columns: 1fr;
@@ -587,11 +945,15 @@ small {
     min-height: 44px;
   }
 
-  .room-bar > div {
-    align-items: flex-start;
+  .room-actions {
+    align-items: stretch;
+
     flex-direction: column;
+
     gap: 8px;
   }
 
+  .stream-count {
+    text-align: center;
+  }
 }
-
