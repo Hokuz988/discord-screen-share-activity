@@ -2,27 +2,52 @@ import http from "node:http";
 import crypto from "node:crypto";
 import express from "express";
 import cors from "cors";
-import { WebSocketServer } from "ws";
+import { WebSocketServer, WebSocket } from "ws";
 
 const app = express();
+
 const server = http.createServer(app);
 
-app.use(cors({
-  origin: "*"
-}));
+const PORT = process.env.PORT || 8787;
+
+const MAX_PRODUCERS = 3;
+
+/* =========================================================
+   EXPRESS
+========================================================= */
+
+app.use(
+  cors({
+    origin: "*",
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"]
+  })
+);
 
 app.use(express.json());
 
+/* =========================================================
+   WEBSOCKET
+========================================================= */
+
 const wss = new WebSocketServer({
-  server
+  server,
+  perMessageDeflate: false
 });
 
+/* =========================================================
+   SALAS
+========================================================= */
+
+/*
+room = {
+  id,
+  clients: Set<WebSocket>,
+  producers: Map<producerId, WebSocket>
+}
+*/
+
 const rooms = new Map();
-
-const PORT =
-  process.env.PORT || 8787;
-
-const MAX_PRODUCERS = 3;
 
 /* =========================================================
    HTTP
@@ -32,16 +57,18 @@ app.get("/", (_, res) => {
   res.json({
     ok: true,
     service: "ScreenCast Signaling Server",
-    maxProducers: MAX_PRODUCERS
+    maxProducers: MAX_PRODUCERS,
+    rooms: rooms.size
   });
 });
 
 app.get("/health", (_, res) => {
-  res.json({
+  res.status(200).json({
     ok: true,
     service: "screencast-signaling",
     rooms: rooms.size,
-    maxProducers: MAX_PRODUCERS
+    maxProducers: MAX_PRODUCERS,
+    uptime: process.uptime()
   });
 });
 
@@ -49,102 +76,105 @@ app.get("/health", (_, res) => {
    CLOUDFLARE TURN
 ========================================================= */
 
-app.get(
-  "/turn-credentials",
-  async (_, res) => {
+app.get("/turn-credentials", async (_, res) => {
+  try {
+    const keyId =
+      process.env.TURN_KEY_ID;
 
-    try {
+    const apiToken =
+      process.env.TURN_API_TOKEN;
 
-      const keyId =
-        process.env.TURN_KEY_ID;
-
-      const apiToken =
-        process.env.TURN_API_TOKEN;
-
-      if (
-        !keyId ||
-        !apiToken
-      ) {
-
-        return res.status(500).json({
-          error:
-            "TURN não configurado no servidor"
-        });
-      }
-
-      const response =
-        await fetch(
-          `https://rtc.live.cloudflare.com/v1/turn/keys/${keyId}/credentials/generate-ice-servers`,
-          {
-            method: "POST",
-
-            headers: {
-              Authorization:
-                `Bearer ${apiToken}`,
-
-              "Content-Type":
-                "application/json"
-            },
-
-            body:
-              JSON.stringify({
-                ttl: 3600
-              })
-          }
-        );
-
-      const data =
-        await response.json();
-
-      if (!response.ok) {
-
-        console.error(
-          "Erro Cloudflare TURN:",
-          data
-        );
-
-        return res.status(500).json({
-          error:
-            "Não foi possível gerar credenciais TURN"
-        });
-      }
-
-      res.json(data);
-
-    } catch (error) {
-
-      console.error(
-        "Erro ao gerar TURN:",
-        error
-      );
-
-      res.status(500).json({
-        error:
-          "Erro interno ao gerar TURN"
+    if (!keyId || !apiToken) {
+      return res.status(500).json({
+        error: "TURN não configurado no servidor"
       });
     }
+
+    const response = await fetch(
+      `https://rtc.live.cloudflare.com/v1/turn/keys/${keyId}/credentials/generate-ice-servers`,
+      {
+        method: "POST",
+
+        headers: {
+          Authorization:
+            `Bearer ${apiToken}`,
+
+          "Content-Type":
+            "application/json"
+        },
+
+        body: JSON.stringify({
+          ttl: 3600
+        })
+      }
+    );
+
+    const data =
+      await response.json();
+
+    if (!response.ok) {
+      console.error(
+        "[TURN] Erro Cloudflare:",
+        data
+      );
+
+      return res.status(500).json({
+        error:
+          "Não foi possível gerar credenciais TURN"
+      });
+    }
+
+    return res.json(data);
+
+  } catch (error) {
+
+    console.error(
+      "[TURN] Erro:",
+      error
+    );
+
+    return res.status(500).json({
+      error:
+        "Erro interno ao gerar TURN"
+    });
   }
-);
+});
 
 /* =========================================================
    UTILIDADES
 ========================================================= */
 
-function send(
-  ws,
-  message
-) {
+function send(ws, message) {
 
   if (
-    ws &&
-    ws.readyState === 1
+    !ws ||
+    ws.readyState !== WebSocket.OPEN
   ) {
+    return false;
+  }
+
+  try {
 
     ws.send(
       JSON.stringify(message)
     );
+
+    return true;
+
+  } catch (error) {
+
+    console.error(
+      "[WS] Erro ao enviar:",
+      error
+    );
+
+    return false;
   }
 }
+
+/* =========================================================
+   BROADCAST
+========================================================= */
 
 function broadcast(
   room,
@@ -162,37 +192,38 @@ function broadcast(
   ) {
 
     if (
-      client !== except &&
-      client.readyState === 1
+      client === except
     ) {
-
-      send(
-        client,
-        message
-      );
+      continue;
     }
+
+    send(
+      client,
+      message
+    );
   }
 }
 
-function getProducerList(
-  room
-) {
+/* =========================================================
+   LISTA DE PRODUTORES
+========================================================= */
+
+function getProducerList(room) {
 
   if (!room) {
     return [];
   }
 
   return Array.from(
-    room.producers.values()
-  ).map(
-    producer =>
-      producer.id
+    room.producers.keys()
   );
 }
 
-function updateProducerList(
-  room
-) {
+/* =========================================================
+   ATUALIZAR PRODUTORES
+========================================================= */
+
+function updateProducerList(room) {
 
   if (!room) {
     return;
@@ -200,6 +231,11 @@ function updateProducerList(
 
   const producers =
     getProducerList(room);
+
+  console.log(
+    `[ROOM] ${room.id} produtores:`,
+    producers
+  );
 
   broadcast(
     room,
@@ -210,31 +246,36 @@ function updateProducerList(
       producers
     }
   );
-
-  console.log(
-    `[ROOM] ${room.id} produtores:`,
-    producers
-  );
 }
 
-function viewerCount(
-  room
-) {
+/* =========================================================
+   VIEWERS
+========================================================= */
+
+function viewerCount(room) {
 
   if (!room) {
     return 0;
   }
 
+  /*
+   * Conta pessoas que não estão
+   * transmitindo.
+   */
+
   return Math.max(
     0,
+
     room.clients.size -
       room.producers.size
   );
 }
 
-function updateViewerCount(
-  room
-) {
+/* =========================================================
+   ATUALIZAR VIEWERS
+========================================================= */
+
+function updateViewerCount(room) {
 
   if (!room) {
     return;
@@ -252,12 +293,16 @@ function updateViewerCount(
   );
 }
 
+/* =========================================================
+   ENCONTRAR CLIENTE
+========================================================= */
+
 function findClient(
   room,
   id
 ) {
 
-  if (!room) {
+  if (!room || !id) {
     return null;
   }
 
@@ -276,6 +321,10 @@ function findClient(
 
   return null;
 }
+
+/* =========================================================
+   ROOM CODE
+========================================================= */
 
 function generateRoomCode() {
 
@@ -301,6 +350,10 @@ function generateRoomCode() {
 
   return code;
 }
+
+/* =========================================================
+   CRIAR ROOM CODE
+========================================================= */
 
 function createRoomCode() {
 
@@ -382,9 +435,7 @@ function removeProducer(
    SAIR DA SALA
 ========================================================= */
 
-function leaveRoom(
-  ws
-) {
+function leaveRoom(ws) {
 
   const room =
     ws.room;
@@ -398,8 +449,8 @@ function leaveRoom(
   );
 
   /*
-   * Remove a transmissão
-   * desse usuário.
+   * Se estava transmitindo,
+   * remove a transmissão.
    */
 
   if (
@@ -429,7 +480,7 @@ function leaveRoom(
   }
 
   /*
-   * Remove usuário da sala.
+   * Remove cliente.
    */
 
   room.clients.delete(
@@ -455,7 +506,8 @@ function leaveRoom(
   );
 
   /*
-   * Remove sala vazia.
+   * Se não sobrou ninguém,
+   * remove a sala.
    */
 
   if (
@@ -473,38 +525,50 @@ function leaveRoom(
 }
 
 /* =========================================================
-   WEBSOCKET
+   WEBSOCKET CONNECTION
 ========================================================= */
 
 wss.on(
   "connection",
-  ws => {
+  (ws, request) => {
 
     /*
-     * ID único do usuário.
+     * ID único deste usuário.
      */
 
     ws.id =
       crypto.randomUUID();
 
+    /*
+     * Sala atual.
+     */
+
     ws.room =
       null;
 
+    /*
+     * Se está transmitindo.
+     */
+
     ws.isProducer =
       false;
+
+    /*
+     * Keep alive.
+     */
+
+    ws.isAlive =
+      true;
 
     console.log(
       `[CONNECT] ${ws.id}`
     );
 
     /*
-     * IMPORTANTE:
+     * Envia o ID imediatamente.
      *
-     * Envia o ID para o frontend.
-     *
-     * O main.jsx usa esse ID
-     * para identificar a própria
-     * transmissão.
+     * Isso é importante porque
+     * o frontend usa myId.current.
      */
 
     send(
@@ -519,7 +583,20 @@ wss.on(
     );
 
     /* =====================================================
-       MENSAGENS
+       PONG
+    ===================================================== */
+
+    ws.on(
+      "pong",
+      () => {
+
+        ws.isAlive =
+          true;
+      }
+    );
+
+    /* =====================================================
+       MESSAGE
     ===================================================== */
 
     ws.on(
@@ -538,8 +615,17 @@ wss.on(
         } catch {
 
           console.warn(
-            "[ERROR] JSON inválido"
+            `[ERROR] JSON inválido de ${ws.id}`
           );
+
+          return;
+        }
+
+        if (
+          !msg ||
+          typeof msg.type !==
+            "string"
+        ) {
 
           return;
         }
@@ -558,10 +644,7 @@ wss.on(
         ) {
 
           if (ws.room) {
-
-            leaveRoom(
-              ws
-            );
+            leaveRoom(ws);
           }
 
           const roomId =
@@ -574,12 +657,6 @@ wss.on(
 
             clients:
               new Set(),
-
-            /*
-             * Até 3 transmissões.
-             *
-             * producerId -> websocket
-             */
 
             producers:
               new Map()
@@ -608,8 +685,7 @@ wss.on(
           );
 
           /*
-           * Sala começa sem
-           * transmissões.
+           * Envia lista vazia.
            */
 
           send(
@@ -628,7 +704,8 @@ wss.on(
               type:
                 "viewer-count",
 
-              count: 0
+              count:
+                viewerCount(room)
             }
           );
 
@@ -693,12 +770,18 @@ wss.on(
             return;
           }
 
-          if (ws.room) {
+          /*
+           * Se já estava em outra
+           * sala, sai primeiro.
+           */
 
-            leaveRoom(
-              ws
-            );
+          if (ws.room) {
+            leaveRoom(ws);
           }
+
+          /*
+           * Adiciona à sala.
+           */
 
           room.clients.add(
             ws
@@ -706,6 +789,10 @@ wss.on(
 
           ws.room =
             room;
+
+          /*
+           * Confirma entrada.
+           */
 
           send(
             ws,
@@ -718,8 +805,10 @@ wss.on(
           );
 
           /*
+           * MUITO IMPORTANTE:
+           *
            * Envia TODAS as transmissões
-           * que já estão ativas.
+           * atuais.
            */
 
           send(
@@ -736,8 +825,7 @@ wss.on(
           );
 
           /*
-           * Envia quantidade
-           * de espectadores.
+           * Envia quantidade de viewers.
            */
 
           send(
@@ -747,15 +835,13 @@ wss.on(
                 "viewer-count",
 
               count:
-                viewerCount(
-                  room
-                )
+                viewerCount(room)
             }
           );
 
           /*
-           * Atualiza todos os
-           * clientes da sala.
+           * Atualiza o restante
+           * da sala.
            */
 
           updateProducerList(
@@ -782,9 +868,10 @@ wss.on(
           "leave-room"
         ) {
 
-          leaveRoom(
-            ws
-          );
+          const oldRoom =
+            ws.room;
+
+          leaveRoom(ws);
 
           send(
             ws,
@@ -794,11 +881,18 @@ wss.on(
             }
           );
 
+          if (oldRoom) {
+
+            console.log(
+              `[ROOM] ${ws.id} saiu`
+            );
+          }
+
           return;
         }
 
         /* =================================================
-           COMEÇAR TRANSMISSÃO
+           START SHARING
         ================================================= */
 
         if (
@@ -826,7 +920,7 @@ wss.on(
           }
 
           /*
-           * Usuário já transmite?
+           * Já transmite?
            */
 
           if (
@@ -850,7 +944,7 @@ wss.on(
           }
 
           /*
-           * Limite de 3.
+           * Limite global.
            */
 
           if (
@@ -873,7 +967,7 @@ wss.on(
           }
 
           /*
-           * Adiciona como produtor.
+           * Adiciona produtor.
            */
 
           room.producers.set(
@@ -889,8 +983,7 @@ wss.on(
           );
 
           /*
-           * Avisa os outros
-           * clientes.
+           * Avisa os outros.
            */
 
           broadcast(
@@ -917,11 +1010,32 @@ wss.on(
             room
           );
 
+          /*
+           * Também confirma
+           * para o próprio produtor.
+           *
+           * Isso ajuda o frontend
+           * a manter a lista correta.
+           */
+
+          send(
+            ws,
+            {
+              type:
+                "producer-list",
+
+              producers:
+                getProducerList(
+                  room
+                )
+            }
+          );
+
           return;
         }
 
         /* =================================================
-           PARAR TRANSMISSÃO
+           STOP SHARING
         ================================================= */
 
         if (
@@ -955,6 +1069,10 @@ wss.on(
           const producerId =
             msg.producerId;
 
+          if (!producerId) {
+            return;
+          }
+
           const producer =
             room.producers.get(
               producerId
@@ -977,10 +1095,8 @@ wss.on(
           }
 
           /*
-           * Pede ao produtor
-           * para criar uma offer
-           * especificamente para
-           * este viewer.
+           * O espectador pede ao produtor
+           * para criar uma conexão.
            */
 
           send(
@@ -1020,6 +1136,11 @@ wss.on(
             );
 
           if (!target) {
+
+            console.warn(
+              `[OFFER] Target não encontrado: ${msg.target}`
+            );
+
             return;
           }
 
@@ -1067,6 +1188,11 @@ wss.on(
             );
 
           if (!target) {
+
+            console.warn(
+              `[ANSWER] Target não encontrado: ${msg.target}`
+            );
+
             return;
           }
 
@@ -1113,6 +1239,11 @@ wss.on(
             );
 
           if (!target) {
+
+            console.warn(
+              `[ICE] Target não encontrado: ${msg.target}`
+            );
+
             return;
           }
 
@@ -1136,6 +1267,25 @@ wss.on(
           return;
         }
 
+        /* =================================================
+           PING MANUAL
+        ================================================= */
+
+        if (
+          msg.type ===
+          "ping"
+        ) {
+
+          send(
+            ws,
+            {
+              type:
+                "pong"
+            }
+          );
+
+          return;
+        }
       }
     );
 
@@ -1145,15 +1295,13 @@ wss.on(
 
     ws.on(
       "close",
-      () => {
+      (code, reason) => {
 
         console.log(
-          `[DISCONNECT] ${ws.id}`
+          `[DISCONNECT] ${ws.id} code=${code} reason=${reason?.toString() || ""}`
         );
 
-        leaveRoom(
-          ws
-        );
+        leaveRoom(ws);
       }
     );
 
@@ -1166,13 +1314,95 @@ wss.on(
       error => {
 
         console.error(
-          `[WS ERROR] ${ws.id}`,
+          `[WS ERROR] ${ws.id}:`,
           error
         );
-
       }
     );
+  }
+);
 
+/* =========================================================
+   WEBSOCKET KEEP ALIVE
+========================================================= */
+
+/*
+ * Render/proxies podem fechar conexões
+ * WebSocket consideradas inativas.
+ *
+ * Este intervalo verifica todos os clientes.
+ */
+
+const heartbeatInterval =
+  setInterval(
+    () => {
+
+      for (
+        const ws
+        of wss.clients
+      ) {
+
+        if (
+          ws.isAlive === false
+        ) {
+
+          console.log(
+            `[WS] Encerrando conexão inativa: ${ws.id}`
+          );
+
+          try {
+            ws.terminate();
+          } catch {}
+
+          continue;
+        }
+
+        ws.isAlive =
+          false;
+
+        try {
+          ws.ping();
+        } catch {}
+      }
+
+    },
+    25000
+  );
+
+/*
+ * Não deixa o timer impedir
+ * o processo de finalizar.
+ */
+
+heartbeatInterval.unref?.();
+
+/* =========================================================
+   WEBSOCKET ERROR
+========================================================= */
+
+wss.on(
+  "error",
+  error => {
+
+    console.error(
+      "[WSS ERROR]",
+      error
+    );
+  }
+);
+
+/* =========================================================
+   HTTP SERVER ERROR
+========================================================= */
+
+server.on(
+  "error",
+  error => {
+
+    console.error(
+      "[SERVER ERROR]",
+      error
+    );
   }
 );
 
@@ -1186,12 +1416,84 @@ server.listen(
   () => {
 
     console.log(
-      `ScreenCast server rodando na porta ${PORT}`
+      "========================================"
     );
 
     console.log(
-      `Máximo de transmissões por sala: ${MAX_PRODUCERS}`
+      " ScreenCast Signaling Server"
     );
 
+    console.log(
+      ` Porta: ${PORT}`
+    );
+
+    console.log(
+      ` Máximo de produtores: ${MAX_PRODUCERS}`
+    );
+
+    console.log(
+      " WebSocket: ATIVO"
+    );
+
+    console.log(
+      " TURN: Cloudflare"
+    );
+
+    console.log(
+      "========================================"
+    );
   }
+);
+
+/* =========================================================
+   SHUTDOWN
+========================================================= */
+
+function shutdown(
+  signal
+) {
+
+  console.log(
+    `[SERVER] ${signal} recebido. Encerrando...`
+  );
+
+  for (
+    const ws
+    of wss.clients
+  ) {
+
+    try {
+
+      ws.close(
+        1001,
+        "Servidor encerrando"
+      );
+
+    } catch {}
+  }
+
+  clearInterval(
+    heartbeatInterval
+  );
+
+  server.close(
+    () => {
+
+      console.log(
+        "[SERVER] Encerrado."
+      );
+
+      process.exit(0);
+    }
+  );
+}
+
+process.on(
+  "SIGTERM",
+  () => shutdown("SIGTERM")
+);
+
+process.on(
+  "SIGINT",
+  () => shutdown("SIGINT")
 );
