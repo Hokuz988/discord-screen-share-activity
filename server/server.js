@@ -54,9 +54,12 @@ app.get(
   (_, res) => {
 
     res.json({
-      ok: true,
+      ok:
+        true,
+
       service:
         "ScreenCast Signaling Server",
+
       maxProducers:
         MAX_PRODUCERS
     });
@@ -68,11 +71,15 @@ app.get(
   (_, res) => {
 
     res.json({
-      ok: true,
+      ok:
+        true,
+
       service:
         "screencast-signaling",
+
       rooms:
         rooms.size,
+
       maxProducers:
         MAX_PRODUCERS
     });
@@ -279,8 +286,7 @@ function viewerCount(
   }
 
   /*
-   * Todos os clientes que não
-   * são produtores são viewers.
+   * Clientes que não são produtores.
    */
   return Math.max(
     0,
@@ -379,6 +385,23 @@ function createRoomCode() {
   );
 
   return code;
+}
+
+/* =========================================================
+   VALIDAR CLIENTE / SALA
+========================================================= */
+
+function isInRoom(
+  ws,
+  room
+) {
+
+  return Boolean(
+    ws &&
+    room &&
+    ws.room === room &&
+    room.clients.has(ws)
+  );
 }
 
 /* =========================================================
@@ -540,7 +563,7 @@ wss.on(
   ws => {
 
     /*
-     * ID único do cliente.
+     * ID único.
      */
     ws.id =
       crypto.randomUUID();
@@ -556,10 +579,7 @@ wss.on(
     );
 
     /*
-     * MUITO IMPORTANTE:
-     *
-     * O frontend precisa saber
-     * qual é sua própria ID.
+     * Envia ID imediatamente.
      */
     send(
       ws,
@@ -612,6 +632,7 @@ wss.on(
         ) {
 
           if (ws.room) {
+
             leaveRoom(
               ws
             );
@@ -621,15 +642,13 @@ wss.on(
             createRoomCode();
 
           const room = {
+
             id:
               roomId,
 
             clients:
               new Set(),
 
-            /*
-             * producerId -> websocket
-             */
             producers:
               new Map()
           };
@@ -646,6 +665,9 @@ wss.on(
           ws.room =
             room;
 
+          ws.isProducer =
+            false;
+
           send(
             ws,
             {
@@ -656,9 +678,6 @@ wss.on(
             }
           );
 
-          /*
-           * A sala acabou de ser criada.
-           */
           send(
             ws,
             {
@@ -743,6 +762,7 @@ wss.on(
           }
 
           if (ws.room) {
+
             leaveRoom(
               ws
             );
@@ -755,6 +775,9 @@ wss.on(
           ws.room =
             room;
 
+          ws.isProducer =
+            false;
+
           send(
             ws,
             {
@@ -766,10 +789,8 @@ wss.on(
           );
 
           /*
-           * Envia a lista SOMENTE para
-           * quem acabou de entrar.
-           *
-           * Isso evita duplicação.
+           * Primeiro envia a lista
+           * diretamente para o novo cliente.
            */
           send(
             ws,
@@ -784,10 +805,6 @@ wss.on(
             }
           );
 
-          /*
-           * Envia contador somente
-           * para quem entrou.
-           */
           send(
             ws,
             {
@@ -802,9 +819,7 @@ wss.on(
           );
 
           /*
-           * Atualiza os OUTROS clientes.
-           *
-           * Não manda novamente para ws.
+           * Depois atualiza os outros.
            */
           broadcast(
             room,
@@ -877,7 +892,12 @@ wss.on(
           const room =
             ws.room;
 
-          if (!room) {
+          if (
+            !isInRoom(
+              ws,
+              room
+            )
+          ) {
 
             send(
               ws,
@@ -939,7 +959,7 @@ wss.on(
           }
 
           /*
-           * REGISTRA UMA ÚNICA VEZ.
+           * Registra UMA vez.
            */
           room.producers.set(
             ws.id,
@@ -954,8 +974,7 @@ wss.on(
           );
 
           /*
-           * Avisa os OUTROS clientes
-           * que surgiu uma transmissão.
+           * Avisa os outros.
            */
           broadcast(
             room,
@@ -970,7 +989,7 @@ wss.on(
           );
 
           /*
-           * Atualiza a lista geral.
+           * Atualiza lista.
            */
           updateProducerList(
             room
@@ -1011,7 +1030,13 @@ wss.on(
           const room =
             ws.room;
 
-          if (!room) {
+          if (
+            !isInRoom(
+              ws,
+              room
+            )
+          ) {
+
             return;
           }
 
@@ -1026,7 +1051,7 @@ wss.on(
           }
 
           /*
-           * O produtor precisa existir
+           * Produtor precisa existir
            * nessa sala.
            */
           const producer =
@@ -1051,16 +1076,21 @@ wss.on(
           }
 
           /*
-           * Nunca manda request para
-           * a própria transmissão.
+           * Nunca pede nossa própria
+           * transmissão.
            */
           if (
             producer.id ===
             ws.id
           ) {
+
             return;
           }
 
+          /*
+           * Envia pedido diretamente
+           * ao produtor.
+           */
           send(
             producer,
             {
@@ -1087,22 +1117,18 @@ wss.on(
           const room =
             ws.room;
 
-          if (!room) {
-            return;
-          }
+          if (
+            !isInRoom(
+              ws,
+              room
+            )
+          ) {
 
-          const target =
-            findClient(
-              room,
-              msg.target
-            );
-
-          if (!target) {
             return;
           }
 
           /*
-           * Só o produtor registrado
+           * Apenas produtor registrado
            * pode enviar offer.
            */
           if (
@@ -1115,6 +1141,40 @@ wss.on(
               "Offer rejeitada: cliente não é produtor.",
               ws.id
             );
+
+            return;
+          }
+
+          const targetId =
+            String(
+              msg.target ||
+              ""
+            );
+
+          if (!targetId) {
+            return;
+          }
+
+          const target =
+            findClient(
+              room,
+              targetId
+            );
+
+          if (!target) {
+
+            console.warn(
+              "Offer: target não encontrado:",
+              targetId
+            );
+
+            return;
+          }
+
+          if (
+            target ===
+            ws
+          ) {
 
             return;
           }
@@ -1151,17 +1211,41 @@ wss.on(
           const room =
             ws.room;
 
-          if (!room) {
+          if (
+            !isInRoom(
+              ws,
+              room
+            )
+          ) {
+
+            return;
+          }
+
+          const targetId =
+            String(
+              msg.target ||
+              ""
+            );
+
+          if (!targetId) {
             return;
           }
 
           const target =
             findClient(
               room,
-              msg.target
+              targetId
             );
 
           if (!target) {
+            return;
+          }
+
+          if (
+            target ===
+            ws
+          ) {
+
             return;
           }
 
@@ -1197,17 +1281,96 @@ wss.on(
           const room =
             ws.room;
 
-          if (!room) {
+          if (
+            !isInRoom(
+              ws,
+              room
+            )
+          ) {
+
+            return;
+          }
+
+          const targetId =
+            String(
+              msg.target ||
+              ""
+            );
+
+          if (!targetId) {
             return;
           }
 
           const target =
             findClient(
               room,
-              msg.target
+              targetId
             );
 
           if (!target) {
+            return;
+          }
+
+          if (
+            target ===
+            ws
+          ) {
+
+            return;
+          }
+
+          /*
+           * Só permite ICE relacionado
+           * a uma transmissão existente
+           * quando o remetente é produtor.
+           *
+           * Para ICE de viewer -> produtor,
+           * o producerId identifica o produtor.
+           */
+          const producerId =
+            String(
+              msg.producerId ||
+              ""
+            );
+
+          if (!producerId) {
+            return;
+          }
+
+          /*
+           * Se o remetente é produtor,
+           * ele precisa ser o producerId.
+           */
+          if (
+            room.producers.has(
+              ws.id
+            ) &&
+            producerId !==
+              ws.id
+          ) {
+
+            console.warn(
+              "ICE rejeitado: producerId inválido."
+            );
+
+            return;
+          }
+
+          /*
+           * Se o remetente não é produtor,
+           * o producerId precisa existir.
+           */
+          if (
+            !room.producers.has(
+              producerId
+            )
+          ) {
+
+            console.warn(
+              "ICE rejeitado: produtor inexistente.",
+              producerId
+            );
+
             return;
           }
 
@@ -1220,8 +1383,7 @@ wss.on(
               from:
                 ws.id,
 
-              producerId:
-                msg.producerId,
+              producerId,
 
               candidate:
                 msg.candidate
@@ -1230,7 +1392,6 @@ wss.on(
 
           return;
         }
-
       }
     );
 
@@ -1251,6 +1412,10 @@ wss.on(
         );
       }
     );
+
+    /* =====================================================
+       ERROR
+    ===================================================== */
 
     ws.on(
       "error",

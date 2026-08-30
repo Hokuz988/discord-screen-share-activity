@@ -37,16 +37,23 @@ let discordSdk = null;
 ========================================================= */
 
 async function getIceServers() {
+
   try {
-    const response = await fetch(
-      `${TURN_SERVER_URL}/turn-credentials`,
-      {
-        method: "GET",
-        cache: "no-store"
-      }
-    );
+
+    const response =
+      await fetch(
+        `${TURN_SERVER_URL}/turn-credentials`,
+        {
+          method:
+            "GET",
+
+          cache:
+            "no-store"
+        }
+      );
 
     if (!response.ok) {
+
       throw new Error(
         `TURN HTTP ${response.status}`
       );
@@ -57,8 +64,11 @@ async function getIceServers() {
 
     if (
       !data ||
-      !Array.isArray(data.iceServers)
+      !Array.isArray(
+        data.iceServers
+      )
     ) {
+
       throw new Error(
         "TURN inválido."
       );
@@ -107,6 +117,23 @@ function App() {
     setSharing
   ] = useState(false);
 
+  /*
+   * Define se o áudio da fonte
+   * compartilhada será enviado.
+   *
+   * IMPORTANTE:
+   * isso controla o áudio fornecido
+   * pelo getDisplayMedia().
+   *
+   * Para evitar áudio do Discord,
+   * o ideal é compartilhar somente
+   * a janela/aba do aplicativo desejado.
+   */
+  const [
+    shareAudio,
+    setShareAudio
+  ] = useState(false);
+
   const [
     roomCode,
     setRoomCode
@@ -138,10 +165,9 @@ function App() {
   ] = useState(0);
 
   /*
-   * SOMENTE produtores REMOTOS.
+   * Somente produtores REMOTOS.
    *
-   * A própria transmissão NÃO entra aqui.
-   * Ela é representada por "local".
+   * A própria transmissão é "local".
    */
   const [
     producers,
@@ -172,33 +198,42 @@ function App() {
    * producerId -> MediaStream
    */
   const streams =
-    useRef(new Map());
+    useRef(
+      new Map()
+    );
 
   /*
    * producerId -> HTMLVideoElement
    */
   const videoRefs =
-    useRef(new Map());
+    useRef(
+      new Map()
+    );
 
   /*
    * local->viewerId
    * producerId->local
    */
   const peerConnections =
-    useRef(new Map());
+    useRef(
+      new Map()
+    );
 
   /*
    * PeerConnection -> ICE pendente
    */
   const pendingCandidates =
-    useRef(new Map());
+    useRef(
+      new Map()
+    );
 
   /*
-   * Evita pedir a mesma transmissão
-   * várias vezes.
+   * Evita solicitações duplicadas.
    */
   const requestedOffers =
-    useRef(new Set());
+    useRef(
+      new Set()
+    );
 
   const roomId =
     useRef("");
@@ -240,7 +275,9 @@ function App() {
           return;
         }
 
-        setDiscordReady(true);
+        setDiscordReady(
+          true
+        );
 
         setStatus(
           "Conectado ao Discord"
@@ -270,7 +307,10 @@ function App() {
       cleanupAll();
 
       if (ws.current) {
-        ws.current.close();
+
+        try {
+          ws.current.close();
+        } catch {}
       }
     };
 
@@ -475,9 +515,6 @@ function App() {
                 ? msg.producers
                 : [];
 
-            /*
-             * Remove nossa própria ID.
-             */
             const remoteList =
               list.filter(
                 producerId =>
@@ -486,9 +523,6 @@ function App() {
                     myId.current
               );
 
-            /*
-             * Limita a 3.
-             */
             const limitedList =
               remoteList.slice(
                 0,
@@ -504,11 +538,6 @@ function App() {
               limitedList
             );
 
-            /*
-             * Se a transmissão selecionada
-             * não existe mais, seleciona
-             * outra.
-             */
             setSelectedProducer(
               current => {
 
@@ -516,6 +545,7 @@ function App() {
                   current ===
                   "local"
                 ) {
+
                   return current;
                 }
 
@@ -524,6 +554,7 @@ function App() {
                     current
                   )
                 ) {
+
                   return current;
                 }
 
@@ -535,7 +566,7 @@ function App() {
             );
 
             /*
-             * Pede cada transmissão.
+             * Solicita todas as transmissões.
              */
             for (
               const producerId
@@ -569,9 +600,6 @@ function App() {
               return;
             }
 
-            /*
-             * Nunca adiciona a própria ID.
-             */
             if (
               producerId ===
               myId.current
@@ -587,6 +615,7 @@ function App() {
                     producerId
                   )
                 ) {
+
                   return current;
                 }
 
@@ -594,6 +623,7 @@ function App() {
                   current.length >=
                   MAX_PRODUCERS
                 ) {
+
                   return current;
                 }
 
@@ -685,11 +715,6 @@ function App() {
             msg.type ===
             "request-offer"
           ) {
-
-            /*
-             * Alguém quer assistir
-             * nossa transmissão.
-             */
 
             if (
               localStream.current
@@ -793,7 +818,9 @@ function App() {
      SEND
   ========================================================= */
 
-  function send(message) {
+  function send(
+    message
+  ) {
 
     if (
       !ws.current ||
@@ -992,8 +1019,11 @@ function App() {
     }
 
     /*
-     * O limite é somente de
-     * produtores remotos + nós mesmos.
+     * O limite é de 3 produtores.
+     *
+     * Como producers contém somente
+     * os remotos, se já existirem 3
+     * remotos não podemos iniciar.
      */
     if (
       producers.length >=
@@ -1014,13 +1044,22 @@ function App() {
       );
 
       /*
+       * O navegador mostra a interface
+       * para escolher:
+       *
+       * - tela
+       * - janela
+       * - aba
+       *
+       * shareAudio controla se pedimos
+       * áudio da fonte.
+       *
        * IMPORTANTE:
        *
-       * O navegador decide se pode
-       * disponibilizar áudio da tela.
-       *
-       * No Chrome/Edge normalmente
-       * aparece a opção "Compartilhar áudio".
+       * Para não transmitir conversa
+       * do Discord, prefira compartilhar
+       * a janela/aba do aplicativo desejado
+       * e NÃO o áudio do sistema inteiro.
        */
       const stream =
         await navigator.mediaDevices.getDisplayMedia(
@@ -1040,7 +1079,19 @@ function App() {
               }
             },
 
-            audio: true
+            audio:
+              shareAudio
+                ? {
+                    echoCancellation:
+                      false,
+
+                    noiseSuppression:
+                      false,
+
+                    autoGainControl:
+                      false
+                  }
+                : false
           }
         );
 
@@ -1048,6 +1099,32 @@ function App() {
         "Stream local:",
         stream
       );
+
+      /*
+       * Alguns navegadores podem retornar
+       * áudio mesmo quando o usuário não
+       * selecionou áudio.
+       *
+       * Se shareAudio estiver desligado,
+       * removemos qualquer faixa de áudio.
+       */
+      if (!shareAudio) {
+
+        stream
+          .getAudioTracks()
+          .forEach(
+            track => {
+
+              try {
+                track.stop();
+              } catch {}
+
+              stream.removeTrack(
+                track
+              );
+            }
+          );
+      }
 
       localStream.current =
         stream;
@@ -1060,7 +1137,8 @@ function App() {
       setAudioStates(
         current => ({
           ...current,
-          local: false
+          local:
+            false
         })
       );
 
@@ -1079,6 +1157,12 @@ function App() {
           stream;
 
         localVideo.muted =
+          true;
+
+        localVideo.playsInline =
+          true;
+
+        localVideo.autoplay =
           true;
 
         localVideo.play()
@@ -1103,6 +1187,7 @@ function App() {
             if (
               localStream.current
             ) {
+
               stopSharing();
             }
           }
@@ -1118,13 +1203,48 @@ function App() {
       );
 
       /*
-       * Só agora informa ao servidor
-       * que virou produtor.
+       * Agora vira produtor.
        */
-      send({
-        type:
-          "start-sharing"
-      });
+      const sent =
+        send({
+          type:
+            "start-sharing"
+        });
+
+      if (!sent) {
+
+        /*
+         * Se o servidor não estiver
+         * conectado, desfaz a captura.
+         */
+        stream
+          .getTracks()
+          .forEach(
+            track => {
+
+              try {
+                track.stop();
+              } catch {}
+            }
+          );
+
+        localStream.current =
+          null;
+
+        streams.current.delete(
+          "local"
+        );
+
+        setSharing(
+          false
+        );
+
+        setError(
+          "Servidor não está conectado."
+        );
+
+        return;
+      }
 
       setStatus(
         "Você está transmitindo"
@@ -1141,6 +1261,7 @@ function App() {
         error?.name ===
         "NotAllowedError"
       ) {
+
         return;
       }
 
@@ -1184,8 +1305,8 @@ function App() {
     );
 
     /*
-     * Fecha somente conexões
-     * onde nós somos produtores.
+     * Fecha conexões onde somos
+     * produtores.
      */
     for (
       const [
@@ -1234,6 +1355,7 @@ function App() {
       );
 
     if (localVideo) {
+
       localVideo.srcObject =
         null;
     }
@@ -1283,7 +1405,8 @@ function App() {
   ========================================================= */
 
   function requestOffer(
-    producerId
+    producerId,
+    force = false
   ) {
 
     if (!producerId) {
@@ -1294,13 +1417,77 @@ function App() {
       producerId ===
       myId.current
     ) {
+
+      return;
+    }
+
+    const key =
+      `${producerId}->local`;
+
+    const existing =
+      peerConnections.current.get(
+        key
+      );
+
+    /*
+     * Se já temos uma conexão
+     * realmente funcional,
+     * não precisamos de outra.
+     */
+    if (
+      existing &&
+      (
+        existing.connectionState ===
+          "connected" ||
+        existing.connectionState ===
+          "connecting"
+      ) &&
+      existing.signalingState !==
+        "closed"
+    ) {
+
+      console.log(
+        "Conexão já funcionando:",
+        key
+      );
+
       return;
     }
 
     /*
-     * Não solicita duas vezes.
+     * Se morreu, limpa.
      */
     if (
+      existing &&
+      (
+        existing.connectionState ===
+          "failed" ||
+        existing.connectionState ===
+          "disconnected" ||
+        existing.signalingState ===
+          "closed"
+      )
+    ) {
+
+      try {
+        existing.close();
+      } catch {}
+
+      peerConnections.current.delete(
+        key
+      );
+
+      pendingCandidates.current.delete(
+        key
+      );
+    }
+
+    /*
+     * Não repete a solicitação,
+     * exceto quando force=true.
+     */
+    if (
+      !force &&
       requestedOffers.current.has(
         producerId
       )
@@ -1323,12 +1510,24 @@ function App() {
       producerId
     );
 
-    send({
-      type:
-        "request-offer",
+    const sent =
+      send({
+        type:
+          "request-offer",
 
-      producerId
-    });
+        producerId
+      });
+
+    /*
+     * Se não conseguiu enviar,
+     * permite tentar novamente.
+     */
+    if (!sent) {
+
+      requestedOffers.current.delete(
+        producerId
+      );
+    }
   }
 
   /* =========================================================
@@ -1343,43 +1542,70 @@ function App() {
       !viewerId ||
       !localStream.current
     ) {
+
       return;
     }
 
     const key =
       `local->${viewerId}`;
 
-    /*
-     * Se já existe uma conexão
-     * funcional, não recria.
-     */
     const existing =
       peerConnections.current.get(
         key
       );
 
-    if (existing) {
-
-      if (
+    /*
+     * Se já existe uma conexão viva,
+     * não cria outra.
+     */
+    if (
+      existing &&
+      existing.signalingState !==
+        "closed" &&
+      (
         existing.connectionState ===
           "connected" ||
         existing.connectionState ===
           "connecting" ||
-        existing.signalingState !==
-          "closed"
-      ) {
+        existing.connectionState ===
+          "new"
+      )
+    ) {
 
-        console.log(
-          "Peer já existe:",
-          key
-        );
+      console.log(
+        "Peer produtor já existe:",
+        key
+      );
 
-        return;
-      }
+      return;
+    }
+
+    if (existing) {
+
+      try {
+        existing.close();
+      } catch {}
+
+      peerConnections.current.delete(
+        key
+      );
+
+      pendingCandidates.current.delete(
+        key
+      );
     }
 
     const iceServers =
       await getIceServers();
+
+    /*
+     * A transmissão pode ter sido
+     * encerrada enquanto aguardávamos
+     * o TURN.
+     */
+    if (!localStream.current) {
+      return;
+    }
 
     const pc =
       new RTCPeerConnection({
@@ -1392,7 +1618,10 @@ function App() {
     );
 
     /*
-     * Vídeo + áudio.
+     * Vídeo + áudio existente no stream.
+     *
+     * Se shareAudio=false,
+     * o stream só possui vídeo.
      */
     for (
       const track
@@ -1439,8 +1668,19 @@ function App() {
           pc.connectionState ===
             "failed" ||
           pc.connectionState ===
+            "disconnected" ||
+          pc.connectionState ===
             "closed"
         ) {
+
+          console.warn(
+            "Conexão do produtor perdida:",
+            key
+          );
+
+          try {
+            pc.close();
+          } catch {}
 
           peerConnections.current.delete(
             key
@@ -1457,9 +1697,25 @@ function App() {
       const offer =
         await pc.createOffer();
 
+      if (
+        pc.signalingState ===
+        "closed"
+      ) {
+
+        return;
+      }
+
       await pc.setLocalDescription(
         offer
       );
+
+      if (
+        pc.signalingState ===
+        "closed"
+      ) {
+
+        return;
+      }
 
       send({
         type:
@@ -1487,6 +1743,10 @@ function App() {
       } catch {}
 
       peerConnections.current.delete(
+        key
+      );
+
+      pendingCandidates.current.delete(
         key
       );
     }
@@ -1517,6 +1777,19 @@ function App() {
       !producerId ||
       !producerFrom
     ) {
+
+      return;
+    }
+
+    /*
+     * Nunca aceita nossa própria
+     * transmissão.
+     */
+    if (
+      producerId ===
+      myId.current
+    ) {
+
       return;
     }
 
@@ -1528,35 +1801,36 @@ function App() {
       producerId
     );
 
-    /*
-     * Se já temos uma conexão válida,
-     * não recria.
-     */
     const old =
       peerConnections.current.get(
         key
       );
 
+    /*
+     * Se a conexão já está viva,
+     * ignora oferta duplicada.
+     */
+    if (
+      old &&
+      old.signalingState !==
+        "closed" &&
+      (
+        old.connectionState ===
+          "connected" ||
+        old.connectionState ===
+          "connecting"
+      )
+    ) {
+
+      console.log(
+        "Conexão já existente:",
+        key
+      );
+
+      return;
+    }
+
     if (old) {
-
-      if (
-        old.signalingState !==
-          "closed" &&
-        (
-          old.connectionState ===
-            "connected" ||
-          old.connectionState ===
-            "connecting"
-        )
-      ) {
-
-        console.log(
-          "Conexão já existente:",
-          key
-        );
-
-        return;
-      }
 
       try {
         old.close();
@@ -1609,8 +1883,7 @@ function App() {
         }
 
         /*
-         * Adiciona somente se
-         * ainda não existir.
+         * Evita track duplicada.
          */
         if (
           !stream
@@ -1628,68 +1901,68 @@ function App() {
         }
 
         /*
-         * Aguarda o React renderizar
-         * o elemento de vídeo.
+         * Atualiza o vídeo.
          */
-        const attachVideo = () => {
+        const attachVideo =
+          () => {
 
-          const video =
-            videoRefs.current.get(
-              producerId
-            );
-
-          if (!video) {
-
-            setTimeout(
-              attachVideo,
-              50
-            );
-
-            return;
-          }
-
-          if (
-            video.srcObject !==
-            stream
-          ) {
-
-            video.srcObject =
-              stream;
-          }
-
-          video.playsInline =
-            true;
-
-          video.autoplay =
-            true;
-
-          video.muted =
-            !(
-              audioStates[
+            const video =
+              videoRefs.current.get(
                 producerId
-              ] ?? false
-            );
+              );
 
-          video.volume =
-            1;
+            if (!video) {
 
-          video.play()
-            .catch(
-              error => {
+              setTimeout(
+                attachVideo,
+                50
+              );
 
-                console.warn(
-                  "Autoplay:",
-                  error
-                );
-              }
-            );
-        };
+              return;
+            }
+
+            if (
+              video.srcObject !==
+              stream
+            ) {
+
+              video.srcObject =
+                stream;
+            }
+
+            video.playsInline =
+              true;
+
+            video.autoplay =
+              true;
+
+            video.muted =
+              !(
+                audioStates[
+                  producerId
+                ] ?? false
+              );
+
+            video.volume =
+              1;
+
+            video.play()
+              .catch(
+                error => {
+
+                  console.warn(
+                    "Autoplay:",
+                    error
+                  );
+                }
+              );
+          };
 
         attachVideo();
 
         /*
-         * Garante que apareça
-         * na lista.
+         * Garante que o produtor
+         * esteja na lista.
          */
         setProducers(
           current => {
@@ -1699,6 +1972,7 @@ function App() {
                 producerId
               )
             ) {
+
               return current;
             }
 
@@ -1706,6 +1980,7 @@ function App() {
               current.length >=
               MAX_PRODUCERS
             ) {
+
               return current;
             }
 
@@ -1758,43 +2033,106 @@ function App() {
 
         if (
           pc.connectionState ===
-            "failed"
-        ) {
-
-          console.warn(
-            "WebRTC falhou:",
-            producerId
-          );
-
-          peerConnections.current.delete(
-            key
-          );
-        }
-
-        if (
+            "failed" ||
+          pc.connectionState ===
+            "disconnected" ||
           pc.connectionState ===
             "closed"
         ) {
 
+          console.warn(
+            "VIEWER: conexão perdida:",
+            producerId,
+            pc.connectionState
+          );
+
+          try {
+            pc.close();
+          } catch {}
+
           peerConnections.current.delete(
             key
+          );
+
+          pendingCandidates.current.delete(
+            key
+          );
+
+          /*
+           * IMPORTANTE:
+           *
+           * Permite solicitar novamente.
+           *
+           * Isso corrige o caso em que
+           * a primeira pessoa tenta receber
+           * uma transmissão, a conexão falha
+           * e requestedOffers continuava
+           * bloqueando uma nova tentativa.
+           */
+          requestedOffers.current.delete(
+            producerId
+          );
+
+          /*
+           * Pequeno retry.
+           */
+          setTimeout(
+            () => {
+
+              if (
+                producers.includes(
+                  producerId
+                )
+              ) {
+
+                requestOffer(
+                  producerId,
+                  true
+                );
+              }
+
+            },
+            1000
           );
         }
       };
 
     try {
 
+      if (
+        pc.signalingState ===
+        "closed"
+      ) {
+
+        return;
+      }
+
       await pc.setRemoteDescription(
         msg.offer
       );
 
+      if (
+        pc.signalingState ===
+        "closed"
+      ) {
+
+        return;
+      }
+
       /*
-       * Agora que temos RemoteDescription,
-       * adicionamos os ICE que chegaram antes.
+       * ICE que chegou antes da offer.
        */
       await flushPendingCandidates(
         key
       );
+
+      if (
+        pc.signalingState ===
+        "closed"
+      ) {
+
+        return;
+      }
 
       const answer =
         await pc.createAnswer();
@@ -1802,6 +2140,14 @@ function App() {
       await pc.setLocalDescription(
         answer
       );
+
+      if (
+        pc.signalingState ===
+        "closed"
+      ) {
+
+        return;
+      }
 
       send({
         type:
@@ -1829,6 +2175,14 @@ function App() {
 
       peerConnections.current.delete(
         key
+      );
+
+      pendingCandidates.current.delete(
+        key
+      );
+
+      requestedOffers.current.delete(
+        producerId
       );
     }
   }
@@ -1869,21 +2223,19 @@ function App() {
       return;
     }
 
-    /*
-     * Não tenta mexer em conexão fechada.
-     */
     if (
       pc.signalingState ===
       "closed"
     ) {
+
       return;
     }
 
     try {
 
       /*
-       * Evita setRemoteDescription
-       * duplicado.
+       * A answer só pode ser aplicada
+       * quando temos uma local offer.
        */
       if (
         pc.signalingState !==
@@ -1912,6 +2264,14 @@ function App() {
         "Erro answer:",
         error
       );
+
+      if (
+        error?.name ===
+        "InvalidStateError"
+      ) {
+
+        return;
+      }
     }
   }
 
@@ -1926,6 +2286,7 @@ function App() {
     if (
       !msg.candidate
     ) {
+
       return;
     }
 
@@ -1941,26 +2302,22 @@ function App() {
         ""
       );
 
-    if (!producerId || !from) {
+    if (
+      !producerId ||
+      !from
+    ) {
+
       return;
     }
 
     /*
-     * Caso 1:
-     *
      * Nós somos viewer.
-     *
-     * producerId -> local
      */
     const viewerKey =
       `${producerId}->local`;
 
     /*
-     * Caso 2:
-     *
      * Nós somos produtor.
-     *
-     * local -> viewer
      */
     const producerKey =
       `local->${from}`;
@@ -1972,7 +2329,7 @@ function App() {
       null;
 
     /*
-     * Primeiro tenta viewer.
+     * Primeiro procura viewer.
      */
     if (
       peerConnections.current.has(
@@ -2040,20 +2397,23 @@ function App() {
     }
 
     /*
-     * CONEXÃO FECHADA
-     *
-     * Esse é justamente o erro
-     * que você estava recebendo.
+     * Não adiciona ICE em conexão morta.
      */
     if (
       pc.signalingState ===
         "closed" ||
       pc.connectionState ===
-        "closed"
+        "closed" ||
+      pc.connectionState ===
+        "failed"
     ) {
 
       console.warn(
-        "ICE ignorado: conexão fechada.",
+        "ICE ignorado: PeerConnection inválida:",
+        key
+      );
+
+      pendingCandidates.current.delete(
         key
       );
 
@@ -2061,7 +2421,7 @@ function App() {
     }
 
     /*
-     * Ainda não há RemoteDescription.
+     * Ainda não temos RemoteDescription.
      */
     if (
       !pc.remoteDescription
@@ -2096,17 +2456,15 @@ function App() {
 
     } catch (error) {
 
-      /*
-       * Não deixa o erro
-       * quebrar a transmissão.
-       */
       if (
         error?.name ===
-        "InvalidStateError"
+          "InvalidStateError" ||
+        error?.name ===
+          "OperationError"
       ) {
 
         console.warn(
-          "ICE ignorado: PeerConnection fechada.",
+          "ICE descartado:",
           key
         );
 
@@ -2139,14 +2497,20 @@ function App() {
 
     if (
       pc.signalingState ===
-      "closed"
+        "closed" ||
+      pc.connectionState ===
+        "closed" ||
+      pc.connectionState ===
+        "failed"
     ) {
+
       return;
     }
 
     if (
       !pc.remoteDescription
     ) {
+
       return;
     }
 
@@ -2164,7 +2528,7 @@ function App() {
     }
 
     /*
-     * Remove da fila antes de processar.
+     * Remove antes de processar.
      */
     pendingCandidates.current.delete(
       key
@@ -2177,8 +2541,13 @@ function App() {
 
       if (
         pc.signalingState ===
-        "closed"
+          "closed" ||
+        pc.connectionState ===
+          "closed" ||
+        pc.connectionState ===
+          "failed"
       ) {
+
         return;
       }
 
@@ -2192,8 +2561,11 @@ function App() {
 
         if (
           error?.name ===
-          "InvalidStateError"
+            "InvalidStateError" ||
+          error?.name ===
+            "OperationError"
         ) {
+
           continue;
         }
 
@@ -2283,6 +2655,7 @@ function App() {
       );
 
     if (video) {
+
       video.srcObject =
         null;
     }
@@ -2305,7 +2678,7 @@ function App() {
 
     /*
      * Se estava selecionado,
-     * escolhe outro.
+     * escolhe outra.
      */
     setSelectedProducer(
       current => {
@@ -2314,6 +2687,7 @@ function App() {
           current !==
           producerId
         ) {
+
           return current;
         }
 
@@ -2570,7 +2944,7 @@ function App() {
     );
 
     /*
-     * Local.
+     * Stream existente.
      */
     const stream =
       streams.current.get(
@@ -2588,8 +2962,7 @@ function App() {
     }
 
     /*
-     * A própria tela sempre
-     * fica mutada.
+     * Local sempre mutado.
      */
     if (
       producerId ===
@@ -2611,17 +2984,18 @@ function App() {
 
     element.volume =
       1;
+
+    element.playsInline =
+      true;
+
+    element.autoplay =
+      true;
   }
 
   /* =========================================================
      DERIVADOS
   ========================================================= */
 
-  /*
-   * Lista visual:
-   *
-   * local + produtores remotos.
-   */
   const displayProducers = [
     ...(sharing
       ? ["local"]
@@ -2636,11 +3010,6 @@ function App() {
     displayProducers.length >
     0;
 
-  /*
-   * Se local estiver selecionado
-   * mas não estivermos transmitindo,
-   * mostra a primeira transmissão remota.
-   */
   const mainProducer =
     selectedProducer ===
       "local" &&
@@ -2715,9 +3084,9 @@ function App() {
                     event.key ===
                     "Enter"
                   ) {
+
                     joinRoom();
                   }
-
                 }
               }
               placeholder="Código da sala"
@@ -2865,7 +3234,6 @@ function App() {
                         </h2>
 
                       </div>
-
                     )
 
                   ) : (
@@ -2889,7 +3257,6 @@ function App() {
                         )
                       }
                     />
-
                   )}
 
                   <div className="main-overlay">
@@ -2941,7 +3308,6 @@ function App() {
                   </p>
 
                 </div>
-
               )}
 
             </section>
@@ -3082,7 +3448,6 @@ function App() {
                     </p>
 
                   </div>
-
                 )}
 
               </div>
@@ -3095,14 +3460,46 @@ function App() {
 
                 {!sharing ? (
 
-                  <button
-                    className="share-button"
-                    onClick={
-                      startSharing
-                    }
-                  >
-                    🖥️ Compartilhar tela
-                  </button>
+                  <>
+                    <label className="audio-option">
+
+                      <input
+                        type="checkbox"
+                        checked={
+                          shareAudio
+                        }
+                        onChange={
+                          event =>
+                            setShareAudio(
+                              event.target.checked
+                            )
+                        }
+                      />
+
+                      <span>
+                        🔊 Compartilhar áudio
+                      </span>
+
+                    </label>
+
+                    <div className="audio-warning">
+                      Para evitar transmitir
+                      conversas do Discord,
+                      compartilhe a janela ou
+                      aba do aplicativo desejado
+                      em vez do áudio do sistema
+                      inteiro.
+                    </div>
+
+                    <button
+                      className="share-button"
+                      onClick={
+                        startSharing
+                      }
+                    >
+                      🖥️ Compartilhar tela
+                    </button>
+                  </>
 
                 ) : (
 
@@ -3114,7 +3511,6 @@ function App() {
                   >
                     ■ Parar transmissão
                   </button>
-
                 )}
 
                 <div className="limit-info">
@@ -3143,7 +3539,6 @@ function App() {
           </div>
 
         </section>
-
       )}
 
     </main>
