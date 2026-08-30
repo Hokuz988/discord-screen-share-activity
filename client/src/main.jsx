@@ -52,6 +52,7 @@ async function getIceServers() {
       );
 
     if (!response.ok) {
+
       throw new Error(
         `TURN HTTP ${response.status}`
       );
@@ -66,6 +67,7 @@ async function getIceServers() {
         data.iceServers
       )
     ) {
+
       throw new Error(
         "TURN inválido."
       );
@@ -220,10 +222,16 @@ function App() {
           return;
         }
 
-        setDiscordReady(true);
+        setDiscordReady(
+          true
+        );
 
         setStatus(
           "Conectado ao Discord"
+        );
+
+        console.log(
+          "Discord SDK conectado."
         );
 
       } catch (error) {
@@ -236,6 +244,7 @@ function App() {
         setStatus(
           "Modo navegador"
         );
+
       }
 
       connectSignal();
@@ -300,7 +309,12 @@ function App() {
                 event.data
               );
 
-          } catch {
+          } catch (error) {
+
+            console.error(
+              "Mensagem inválida:",
+              event.data
+            );
 
             return;
           }
@@ -320,7 +334,25 @@ function App() {
           ) {
 
             const code =
-              msg.roomId;
+              String(
+                msg.roomId || ""
+              )
+                .trim()
+                .toUpperCase();
+
+            if (!code) {
+
+              setError(
+                "O servidor não retornou um código de sala."
+              );
+
+              return;
+            }
+
+            console.log(
+              "SALA CRIADA:",
+              code
+            );
 
             roomId.current =
               code;
@@ -336,6 +368,8 @@ function App() {
             setInRoom(
               true
             );
+
+            setError("");
 
             setStatus(
               "Sala criada"
@@ -353,20 +387,43 @@ function App() {
             "room-joined"
           ) {
 
+            const code =
+              String(
+                msg.roomId || ""
+              )
+                .trim()
+                .toUpperCase();
+
+            if (!code) {
+
+              setError(
+                "O servidor não retornou o código da sala."
+              );
+
+              return;
+            }
+
+            console.log(
+              "ENTROU NA SALA:",
+              code
+            );
+
             roomId.current =
-              msg.roomId;
+              code;
 
             setRoomCode(
-              msg.roomId
+              code
             );
 
             setCurrentRoom(
-              msg.roomId
+              code
             );
 
             setInRoom(
               true
             );
+
+            setError("");
 
             setStatus(
               "Você entrou na sala"
@@ -437,6 +494,11 @@ function App() {
             "error"
           ) {
 
+            console.error(
+              "Servidor retornou erro:",
+              msg.message
+            );
+
             setError(
               msg.message ||
               "Erro no servidor."
@@ -457,6 +519,7 @@ function App() {
             if (
               sharing
             ) {
+
               return;
             }
 
@@ -484,6 +547,10 @@ function App() {
             msg.type ===
             "producer-left"
           ) {
+
+            console.log(
+              "Produtor saiu."
+            );
 
             setWatching(
               false
@@ -519,6 +586,7 @@ function App() {
               await createPeer(
                 msg.viewerId
               );
+
             }
 
             return;
@@ -555,6 +623,12 @@ function App() {
               );
 
             if (!pc) {
+
+              console.warn(
+                "Peer não encontrado para answer:",
+                msg.from
+              );
+
               return;
             }
 
@@ -568,9 +642,7 @@ function App() {
                 msg.from
               );
 
-            } catch (
-              error
-            ) {
+            } catch (error) {
 
               console.error(
                 "Erro answer:",
@@ -614,16 +686,19 @@ function App() {
       socket.onclose =
         () => {
 
+          console.warn(
+            "WebSocket fechado."
+          );
+
           setStatus(
             "Servidor desconectado"
           );
         };
 
-    } catch (
-      error
-    ) {
+    } catch (error) {
 
       console.error(
+        "Erro WebSocket:",
         error
       );
 
@@ -640,21 +715,36 @@ function App() {
   function send(message) {
 
     if (
-      ws.current &&
-      ws.current.readyState ===
+      !ws.current ||
+      ws.current.readyState !==
       WebSocket.OPEN
     ) {
 
-      ws.current.send(
-        JSON.stringify({
-          ...message,
-
-          roomId:
-            roomId.current
-        })
+      console.warn(
+        "WebSocket não está conectado."
       );
 
+      return false;
     }
+
+    const payload = {
+      ...message,
+      roomId:
+        roomId.current
+    };
+
+    console.log(
+      "Enviando:",
+      payload
+    );
+
+    ws.current.send(
+      JSON.stringify(
+        payload
+      )
+    );
+
+    return true;
   }
 
   /* =========================================================
@@ -678,6 +768,15 @@ function App() {
       return;
     }
 
+    console.log(
+      "CRIANDO SALA..."
+    );
+
+    /*
+     * Importante:
+     * criação de sala NÃO envia join-room.
+     */
+
     send({
       type:
         "create-room"
@@ -685,7 +784,7 @@ function App() {
   }
 
   /* =========================================================
-     ENTRAR
+     ENTRAR NA SALA
   ========================================================= */
 
   function joinRoom() {
@@ -697,14 +796,40 @@ function App() {
         .trim()
         .toUpperCase();
 
+    /*
+     * Nunca envia join-room vazio.
+     */
+
     if (!code) {
 
       setError(
         "Digite o código da sala."
       );
 
+      console.warn(
+        "Tentativa de entrar sem código."
+      );
+
       return;
     }
+
+    if (
+      !ws.current ||
+      ws.current.readyState !==
+      WebSocket.OPEN
+    ) {
+
+      setError(
+        "Servidor ainda não conectado."
+      );
+
+      return;
+    }
+
+    console.log(
+      "ENTRANDO NA SALA:",
+      code
+    );
 
     send({
       type:
@@ -721,14 +846,52 @@ function App() {
 
   function leaveRoom() {
 
-    stopSharing();
+    if (
+      localStream.current
+    ) {
 
-    send({
-      type:
-        "leave-room"
-    });
+      localStream.current
+        .getTracks()
+        .forEach(
+          track =>
+            track.stop()
+        );
+
+      localStream.current =
+        null;
+    }
+
+    if (
+      localVideo.current
+    ) {
+
+      localVideo.current
+        .srcObject =
+        null;
+    }
 
     closeAllPeers();
+
+    if (
+      ws.current &&
+      ws.current.readyState ===
+      WebSocket.OPEN &&
+      roomId.current
+    ) {
+
+      send({
+        type:
+          "leave-room"
+      });
+    }
+
+    setSharing(
+      false
+    );
+
+    setWatching(
+      false
+    );
 
     setInRoom(
       false
@@ -742,21 +905,27 @@ function App() {
       ""
     );
 
+    setViewerCount(
+      0
+    );
+
     roomId.current =
       "";
+
+    setStatus(
+      "Servidor conectado"
+    );
   }
 
   /* =========================================================
-     CAPTURA
+     CAPTURA DA TELA
   ========================================================= */
 
   async function startSharing() {
 
     setError("");
 
-    if (
-      !inRoom
-    ) {
+    if (!inRoom) {
 
       setError(
         "Entre em uma sala primeiro."
@@ -766,6 +935,10 @@ function App() {
     }
 
     try {
+
+      console.log(
+        "Solicitando captura da tela..."
+      );
 
       const stream =
         await navigator.mediaDevices.getDisplayMedia(
@@ -789,6 +962,10 @@ function App() {
       localStream.current =
         stream;
 
+      /* =====================================================
+         VÍDEO LOCAL
+      ===================================================== */
+
       if (
         localVideo.current
       ) {
@@ -799,9 +976,18 @@ function App() {
         await localVideo.current
           .play()
           .catch(
-            () => {}
+            error => {
+              console.warn(
+                "Autoplay local:",
+                error
+              );
+            }
           );
       }
+
+      /* =====================================================
+         TRACK
+      ===================================================== */
 
       const videoTrack =
         stream.getVideoTracks()[0];
@@ -811,10 +997,29 @@ function App() {
         videoTrack.addEventListener(
           "ended",
           () => {
+
+            console.log(
+              "Captura encerrada pelo usuário."
+            );
+
             stopSharing();
           }
         );
       }
+
+      console.log(
+        "VIDEO TRACK:",
+        stream.getVideoTracks()
+      );
+
+      console.log(
+        "AUDIO TRACK:",
+        stream.getAudioTracks()
+      );
+
+      /* =====================================================
+         ESTADO
+      ===================================================== */
 
       setSharing(
         true
@@ -833,11 +1038,14 @@ function App() {
         "Você está transmitindo"
       );
 
-    } catch (
-      error
-    ) {
+      console.log(
+        "TRANSMISSÃO INICIADA"
+      );
+
+    } catch (error) {
 
       console.error(
+        "Erro captura:",
         error
       );
 
@@ -845,6 +1053,7 @@ function App() {
         error?.name ===
         "NotAllowedError"
       ) {
+
         return;
       }
 
@@ -855,7 +1064,7 @@ function App() {
   }
 
   /* =========================================================
-     PARAR
+     PARAR TRANSMISSÃO
   ========================================================= */
 
   function stopSharing() {
@@ -870,10 +1079,10 @@ function App() {
           track =>
             track.stop()
         );
-    }
 
-    localStream.current =
-      null;
+      localStream.current =
+        null;
+    }
 
     if (
       localVideo.current
@@ -906,10 +1115,17 @@ function App() {
     setWatching(
       false
     );
+
+    if (inRoom) {
+
+      setStatus(
+        "Servidor conectado"
+      );
+    }
   }
 
   /* =========================================================
-     PEERS
+     FECHAR PEERS
   ========================================================= */
 
   function closeAllPeers() {
@@ -920,7 +1136,9 @@ function App() {
     ) {
 
       try {
+
         pc.close();
+
       } catch {}
     }
 
@@ -936,6 +1154,15 @@ function App() {
   function requestOffer(
     producerId
   ) {
+
+    if (!producerId) {
+
+      console.warn(
+        "Producer ID inválido."
+      );
+
+      return;
+    }
 
     send({
       type:
@@ -953,17 +1180,39 @@ function App() {
     viewerId
   ) {
 
+    if (!viewerId) {
+
+      console.warn(
+        "Viewer ID inválido."
+      );
+
+      return;
+    }
+
+    console.log(
+      "Criando PeerConnection:",
+      viewerId
+    );
+
     const old =
       peerConnections.current.get(
         viewerId
       );
 
     if (old) {
-      old.close();
+
+      try {
+        old.close();
+      } catch {}
     }
 
     const iceServers =
       await getIceServers();
+
+    console.log(
+      "ICE Servers produtor:",
+      iceServers
+    );
 
     const pc =
       new RTCPeerConnection({
@@ -978,7 +1227,9 @@ function App() {
       pc
     );
 
-    /* TRACKS */
+    /* =====================================================
+       TRACKS
+    ===================================================== */
 
     if (
       localStream.current
@@ -996,7 +1247,9 @@ function App() {
       }
     }
 
-    /* ICE */
+    /* =====================================================
+       ICE
+    ===================================================== */
 
     pc.onicecandidate =
       ({ candidate }) => {
@@ -1015,34 +1268,69 @@ function App() {
         }
       };
 
+    pc.onicecandidateerror =
+      event => {
+
+        console.warn(
+          "PRODUTOR ICE ERROR:",
+          event
+        );
+      };
+
+    pc.oniceconnectionstatechange =
+      () => {
+
+        console.log(
+          "PRODUTOR ICE:",
+          pc.iceConnectionState
+        );
+      };
+
     pc.onconnectionstatechange =
       () => {
 
         console.log(
-          "PRODUTOR:",
+          "PRODUTOR CONNECTION:",
           pc.connectionState
         );
       };
 
-    /* OFFER */
+    /* =====================================================
+       OFFER
+    ===================================================== */
 
-    const offer =
-      await pc.createOffer();
+    try {
 
-    await pc.setLocalDescription(
-      offer
-    );
+      const offer =
+        await pc.createOffer();
 
-    send({
-      type:
-        "offer",
+      await pc.setLocalDescription(
+        offer
+      );
 
-      target:
-        viewerId,
+      send({
+        type:
+          "offer",
 
-      offer:
-        pc.localDescription
-    });
+        target:
+          viewerId,
+
+        offer:
+          pc.localDescription
+      });
+
+      console.log(
+        "Offer enviada para:",
+        viewerId
+      );
+
+    } catch (error) {
+
+      console.error(
+        "Erro criando offer:",
+        error
+      );
+    }
   }
 
   /* =========================================================
@@ -1053,17 +1341,30 @@ function App() {
     msg
   ) {
 
+    console.log(
+      "Offer recebida:",
+      msg
+    );
+
     const old =
       peerConnections.current.get(
         msg.from
       );
 
     if (old) {
-      old.close();
+
+      try {
+        old.close();
+      } catch {}
     }
 
     const iceServers =
       await getIceServers();
+
+    console.log(
+      "ICE Servers viewer:",
+      iceServers
+    );
 
     const pc =
       new RTCPeerConnection({
@@ -1078,17 +1379,27 @@ function App() {
       pc
     );
 
-    /* TRACK */
+    /* =====================================================
+       TRACK
+    ===================================================== */
 
     pc.ontrack =
       ({ streams }) => {
 
+        console.log(
+          "TRACK RECEBIDA:",
+          streams
+        );
+
         const stream =
           streams?.[0];
 
-        if (
-          !stream
-        ) {
+        if (!stream) {
+
+          console.warn(
+            "Track sem MediaStream."
+          );
+
           return;
         }
 
@@ -1101,8 +1412,21 @@ function App() {
 
           remoteVideo.current
             .play()
+            .then(
+              () => {
+                console.log(
+                  "Vídeo remoto reproduzindo."
+                );
+              }
+            )
             .catch(
-              () => {}
+              error => {
+
+                console.warn(
+                  "Autoplay remoto:",
+                  error
+                );
+              }
             );
         }
 
@@ -1111,7 +1435,9 @@ function App() {
         );
       };
 
-    /* ICE */
+    /* =====================================================
+       ICE
+    ===================================================== */
 
     pc.onicecandidate =
       ({ candidate }) => {
@@ -1130,11 +1456,29 @@ function App() {
         }
       };
 
+    pc.onicecandidateerror =
+      event => {
+
+        console.warn(
+          "VIEWER ICE ERROR:",
+          event
+        );
+      };
+
+    pc.oniceconnectionstatechange =
+      () => {
+
+        console.log(
+          "VIEWER ICE:",
+          pc.iceConnectionState
+        );
+      };
+
     pc.onconnectionstatechange =
       () => {
 
         console.log(
-          "VIEWER:",
+          "VIEWER CONNECTION:",
           pc.connectionState
         );
 
@@ -1142,6 +1486,10 @@ function App() {
           pc.connectionState ===
           "connected"
         ) {
+
+          console.log(
+            "WEBRTC CONECTADO!"
+          );
 
           setWatching(
             true
@@ -1153,45 +1501,79 @@ function App() {
           "failed"
         ) {
 
+          console.error(
+            "Viewer connection: failed"
+          );
+
           setError(
             "A conexão WebRTC falhou."
           );
         }
       };
 
-    /* REMOTE */
+    /* =====================================================
+       REMOTE DESCRIPTION
+    ===================================================== */
 
-    await pc.setRemoteDescription(
-      msg.offer
-    );
+    try {
 
-    await flushPendingCandidates(
-      msg.from
-    );
+      await pc.setRemoteDescription(
+        msg.offer
+      );
 
-    /* ANSWER */
+      await flushPendingCandidates(
+        msg.from
+      );
 
-    const answer =
-      await pc.createAnswer();
+    } catch (error) {
 
-    await pc.setLocalDescription(
-      answer
-    );
+      console.error(
+        "Erro setRemoteDescription:",
+        error
+      );
 
-    send({
-      type:
-        "answer",
+      return;
+    }
 
-      target:
-        msg.from,
+    /* =====================================================
+       ANSWER
+    ===================================================== */
 
-      answer:
-        pc.localDescription
-    });
+    try {
+
+      const answer =
+        await pc.createAnswer();
+
+      await pc.setLocalDescription(
+        answer
+      );
+
+      send({
+        type:
+          "answer",
+
+        target:
+          msg.from,
+
+        answer:
+          pc.localDescription
+      });
+
+      console.log(
+        "Answer enviada."
+      );
+
+    } catch (error) {
+
+      console.error(
+        "Erro criando answer:",
+        error
+      );
+    }
   }
 
   /* =========================================================
-     ICE
+     ICE CANDIDATE
   ========================================================= */
 
   async function handleIceCandidate(
@@ -1235,9 +1617,11 @@ function App() {
         msg.candidate
       );
 
-    } catch (
-      error
-    ) {
+      console.log(
+        "ICE adicionado."
+      );
+
+    } catch (error) {
 
       console.warn(
         "ICE:",
@@ -1263,6 +1647,7 @@ function App() {
       !pc ||
       !pc.remoteDescription
     ) {
+
       return;
     }
 
@@ -1272,10 +1657,16 @@ function App() {
       );
 
     if (
-      !candidates
+      !candidates ||
+      candidates.length === 0
     ) {
+
       return;
     }
+
+    console.log(
+      `Processando ${candidates.length} ICE candidates.`
+    );
 
     for (
       const candidate of
@@ -1288,7 +1679,13 @@ function App() {
           candidate
         );
 
-      } catch {}
+      } catch (error) {
+
+        console.warn(
+          "Erro ICE pendente:",
+          error
+        );
+      }
     }
 
     pendingCandidates.current.delete(
@@ -1338,71 +1735,85 @@ function App() {
 
       {!inRoom ? (
 
-        <section className="room-menu">
+        <section className="room-screen">
 
-          <h2>
-            Salas
-          </h2>
+          <div className="room-box">
 
-          <p className="muted">
-            Crie uma sala ou entre
-            usando um código.
-          </p>
+            <span className="eyebrow">
+              SCREENCAST
+            </span>
 
-          <button
-            className="primary"
-            onClick={
-              createRoom
-            }
-          >
-            ➕ Criar sala
-          </button>
+            <h2>
+              Salas
+            </h2>
 
-          <div className="join-box">
-
-            <input
-              value={
-                roomInput
-              }
-              onChange={
-                event =>
-                  setRoomInput(
-                    event.target.value
-                  )
-              }
-              onKeyDown={
-                event => {
-
-                  if (
-                    event.key ===
-                    "Enter"
-                  ) {
-
-                    joinRoom();
-                  }
-                }
-              }
-              placeholder="Código da sala"
-              maxLength={6}
-            />
+            <p>
+              Crie uma sala ou entre
+              usando um código.
+            </p>
 
             <button
+              className="primary"
               onClick={
-                joinRoom
+                createRoom
               }
             >
-              Entrar
+              ➕ Criar sala
             </button>
 
-          </div>
-
-          {error && (
-
-            <div className="error">
-              {error}
+            <div className="separator">
+              OU
             </div>
 
-          )}
+            <div className="join-box">
+
+              <input
+                value={
+                  roomInput
+                }
+                onChange={
+                  event =>
+                    setRoomInput(
+                      event.target.value
+                    )
+                }
+                onKeyDown={
+                  event => {
+
+                    if (
+                      event.key ===
+                      "Enter"
+                    ) {
+
+                      joinRoom();
+                    }
+                  }
+                }
+                placeholder="Código da sala"
+                maxLength={6}
+                autoComplete="off"
+              />
+
+              <button
+                className="secondary"
+                onClick={
+                  joinRoom
+                }
+              >
+                Entrar
+              </button>
+
+            </div>
+
+            {error && (
+
+              <div className="error">
+                {error}
+              </div>
+
+            )}
+
+          </div>
 
         </section>
 
@@ -1425,6 +1836,7 @@ function App() {
             </div>
 
             <button
+              className="secondary"
               onClick={
                 leaveRoom
               }
@@ -1571,8 +1983,7 @@ function App() {
               )}
 
               <small>
-                Código da sala:
-                {" "}
+                Código da sala:{" "}
                 <b>
                   {currentRoom}
                 </b>
