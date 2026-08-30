@@ -1,13 +1,16 @@
 import React, {
   useEffect,
   useRef,
-  useState,
+  useState
 } from "react";
 
-import { createRoot } from "react-dom/client";
+import {
+  createRoot
+} from "react-dom/client";
 
-import { DiscordSDK } from
-  "@discord/embedded-app-sdk";
+import {
+  DiscordSDK
+} from "@discord/embedded-app-sdk";
 
 import "./style.css";
 
@@ -18,38 +21,107 @@ const SIGNALING_URL =
   import.meta.env.VITE_SIGNALING_URL ||
   "ws://localhost:8787";
 
+const TURN_URL =
+  "https://screen-share-activity.onrender.com";
+
 let discordSdk = null;
 
+/* ==========================================
+   TURN
+========================================== */
+
+async function getIceServers() {
+  try {
+    const response =
+      await fetch(
+        `${TURN_URL}/turn-credentials`
+      );
+
+    if (!response.ok) {
+      throw new Error(
+        `TURN HTTP ${response.status}`
+      );
+    }
+
+    const data =
+      await response.json();
+
+    if (
+      !data.iceServers
+    ) {
+      throw new Error(
+        "TURN não retornou iceServers"
+      );
+    }
+
+    console.log(
+      "TURN configurado:",
+      data.iceServers
+    );
+
+    return data.iceServers;
+
+  } catch (error) {
+    console.error(
+      "Erro ao obter TURN:",
+      error
+    );
+
+    /*
+     * Fallback para STUN.
+     */
+
+    return [
+      {
+        urls:
+          "stun:stun.l.google.com:19302"
+      }
+    ];
+  }
+}
+
+/* ==========================================
+   APP
+========================================== */
+
 function App() {
-  const [discordReady, setDiscordReady] =
-    useState(false);
+  const [
+    discordReady,
+    setDiscordReady
+  ] = useState(false);
 
-  const [status, setStatus] =
-    useState("Conectando...");
+  const [
+    status,
+    setStatus
+  ] = useState(
+    "Conectando..."
+  );
 
-  const [roomId, setRoomId] =
-    useState("");
+  const [
+    sharing,
+    setSharing
+  ] = useState(false);
 
-  const [roomInput, setRoomInput] =
-    useState("");
+  const [
+    watching,
+    setWatching
+  ] = useState(false);
 
-  const [inRoom, setInRoom] =
-    useState(false);
+  const [
+    viewerCount,
+    setViewerCount
+  ] = useState(0);
 
-  const [sharing, setSharing] =
-    useState(false);
+  const [
+    error,
+    setError
+  ] = useState("");
 
-  const [watching, setWatching] =
-    useState(false);
-
-  const [viewerCount, setViewerCount] =
-    useState(0);
-
-  const [error, setError] =
-    useState("");
-
-  const [userName] =
-    useState("Visitante");
+  const [
+    userName
+  ] = useState(
+    "Visitante"
+  );
 
   const localVideo =
     useRef(null);
@@ -66,48 +138,14 @@ function App() {
   const peerConnections =
     useRef(new Map());
 
-  /*
-   * ==========================================
-   * STREAM -> VIDEO
-   * ==========================================
-   */
+  const roomId =
+    useRef(
+      "discord-activity-room"
+    );
 
-  useEffect(() => {
-    if (
-      !localVideo.current ||
-      !localStream.current
-    ) {
-      return;
-    }
-
-    const video =
-      localVideo.current;
-
-    const stream =
-      localStream.current;
-
-    video.srcObject = stream;
-
-    video
-      .play()
-      .then(() => {
-        console.log(
-          "Vídeo local iniciado"
-        );
-      })
-      .catch((error) => {
-        console.warn(
-          "Play local:",
-          error
-        );
-      });
-  }, [sharing]);
-
-  /*
-   * ==========================================
-   * DISCORD
-   * ==========================================
-   */
+  /* ========================================
+     DISCORD
+  ======================================== */
 
   useEffect(() => {
     let alive = true;
@@ -138,20 +176,14 @@ function App() {
         setDiscordReady(true);
 
         setStatus(
-          "Discord conectado"
+          "Conectado ao Discord"
         );
 
-        console.log(
-          "Discord SDK pronto"
-        );
-      } catch (error) {
-        console.error(
-          "Discord SDK:",
-          error
-        );
+      } catch (e) {
+        console.warn(e);
 
         setStatus(
-          "Discord SDK não conectado"
+          "Modo navegador"
         );
       }
 
@@ -167,30 +199,22 @@ function App() {
 
       ws.current?.close();
     };
+
   }, []);
 
-  /*
-   * ==========================================
-   * WEBSOCKET
-   * ==========================================
-   */
+  /* ========================================
+     WEBSOCKET
+  ======================================== */
 
   function connectSignal() {
-    if (
-      ws.current &&
-      ws.current.readyState ===
-        WebSocket.OPEN
-    ) {
-      return;
-    }
-
     try {
       const socket =
         new WebSocket(
           SIGNALING_URL
         );
 
-      ws.current = socket;
+      ws.current =
+        socket;
 
       socket.onopen = () => {
         console.log(
@@ -199,6 +223,16 @@ function App() {
 
         setStatus(
           "Servidor conectado"
+        );
+
+        socket.send(
+          JSON.stringify({
+            type: "join",
+            roomId:
+              roomId.current,
+            name:
+              userName
+          })
         );
       };
 
@@ -214,71 +248,6 @@ function App() {
             msg
           );
 
-          /*
-           * SALA CRIADA
-           */
-
-          if (
-            msg.type ===
-            "room-created"
-          ) {
-            setRoomId(
-              msg.roomId
-            );
-
-            setInRoom(true);
-
-            setError("");
-
-            setStatus(
-              `Sala ${msg.roomId}`
-            );
-
-            return;
-          }
-
-          /*
-           * ENTROU NA SALA
-           */
-
-          if (
-            msg.type ===
-            "room-joined"
-          ) {
-            setRoomId(
-              msg.roomId
-            );
-
-            setInRoom(true);
-
-            setError("");
-
-            setStatus(
-              `Sala ${msg.roomId}`
-            );
-
-            return;
-          }
-
-          /*
-           * ERRO
-           */
-
-          if (
-            msg.type ===
-            "error"
-          ) {
-            setError(
-              msg.message
-            );
-
-            return;
-          }
-
-          /*
-           * QUANTIDADE
-           */
-
           if (
             msg.type ===
             "viewer-count"
@@ -289,10 +258,6 @@ function App() {
 
             return;
           }
-
-          /*
-           * PRODUTOR SAIU
-           */
 
           if (
             msg.type ===
@@ -309,50 +274,13 @@ function App() {
                 null;
             }
 
-            setStatus(
-              "Nenhuma transmissão"
-            );
-
             return;
           }
-
-          /*
-           * ESPECTADOR PEDIU OFFER
-           */
-
-          if (
-            msg.type ===
-            "request-offer"
-          ) {
-            console.log(
-              "Offer solicitada por:",
-              msg.viewerId
-            );
-
-            if (
-              localStream.current
-            ) {
-              await createPeer(
-                msg.viewerId
-              );
-            }
-
-            return;
-          }
-
-          /*
-           * PRODUTOR ENCONTRADO
-           */
 
           if (
             msg.type ===
             "producer"
           ) {
-            console.log(
-              "Produtor:",
-              msg.producerId
-            );
-
             if (!sharing) {
               setWatching(
                 true
@@ -366,9 +294,16 @@ function App() {
             return;
           }
 
-          /*
-           * OFFER
-           */
+          if (
+            msg.type ===
+            "request-offer"
+          ) {
+            await createPeer(
+              msg.viewerId
+            );
+
+            return;
+          }
 
           if (
             msg.type ===
@@ -380,10 +315,6 @@ function App() {
 
             return;
           }
-
-          /*
-           * ANSWER
-           */
 
           if (
             msg.type ===
@@ -403,10 +334,6 @@ function App() {
             return;
           }
 
-          /*
-           * ICE
-           */
-
           if (
             msg.type ===
             "ice"
@@ -420,240 +347,199 @@ function App() {
               pc &&
               msg.candidate
             ) {
-              await pc
-                .addIceCandidate(
+              try {
+                await pc.addIceCandidate(
                   msg.candidate
-                )
-                .catch(
-                  console.warn
                 );
+              } catch (
+                error
+              ) {
+                console.warn(
+                  "Erro ICE:",
+                  error
+                );
+              }
             }
-
-            return;
           }
         };
 
-      socket.onerror = () => {
-        setError(
-          "Erro no servidor."
-        );
-      };
+      socket.onerror =
+        (event) => {
+          console.error(
+            "WebSocket error:",
+            event
+          );
 
-      socket.onclose = () => {
-        setStatus(
-          "Servidor desconectado"
-        );
-      };
+          setError(
+            "Erro no servidor."
+          );
+        };
+
+      socket.onclose =
+        () => {
+          console.log(
+            "WebSocket fechado"
+          );
+
+          setStatus(
+            "Servidor desconectado"
+          );
+        };
+
     } catch (error) {
-      console.error(error);
+      console.error(
+        error
+      );
 
       setError(
-        "Não foi possível conectar ao servidor."
+        "WebSocket indisponível."
       );
     }
   }
 
-  /*
-   * ==========================================
-   * SEND
-   * ==========================================
-   */
+  /* ========================================
+     SEND
+  ======================================== */
 
   function send(message) {
     if (
-      ws.current?.readyState !==
+      ws.current?.readyState ===
       WebSocket.OPEN
     ) {
-      return;
-    }
+      const payload = {
+        ...message,
+        roomId:
+          roomId.current
+      };
 
-    ws.current.send(
-      JSON.stringify(message)
-    );
-  }
-
-  /*
-   * ==========================================
-   * CRIAR SALA
-   * ==========================================
-   */
-
-  function createRoom() {
-    setError("");
-
-    send({
-      type: "create-room",
-      name: userName,
-    });
-  }
-
-  /*
-   * ==========================================
-   * ENTRAR
-   * ==========================================
-   */
-
-  function joinRoom() {
-    const code =
-      roomInput
-        .trim()
-        .toUpperCase();
-
-    if (!code) {
-      setError(
-        "Digite o código da sala."
+      console.log(
+        "Enviando:",
+        payload
       );
 
-      return;
+      ws.current.send(
+        JSON.stringify(
+          payload
+        )
+      );
     }
-
-    setError("");
-
-    send({
-      type: "join-room",
-      roomId: code,
-      name: userName,
-    });
   }
 
-  /*
-   * ==========================================
-   * SAIR
-   * ==========================================
-   */
-
-  function leaveRoom() {
-    stopSharing();
-
-    send({
-      type: "leave-room",
-    });
-
-    setRoomId("");
-
-    setInRoom(false);
-
-    setWatching(false);
-
-    setViewerCount(0);
-
-    setStatus(
-      "Fora da sala"
-    );
-  }
-
-  /*
-   * ==========================================
-   * CAPTURA
-   * ==========================================
-   */
+  /* ========================================
+     SHARE SCREEN
+  ======================================== */
 
   async function startSharing() {
     setError("");
 
-    if (!inRoom) {
-      setError(
-        "Entre ou crie uma sala primeiro."
-      );
-
-      return;
-    }
-
     try {
-      console.log(
-        "Solicitando captura..."
-      );
-
       const stream =
         await navigator.mediaDevices.getDisplayMedia(
           {
             video: {
               frameRate: {
                 ideal: 30,
-                max: 60,
-              },
+                max: 60
+              }
             },
-
-            audio: true,
+            audio: true
           }
         );
 
       console.log(
-        "Stream:",
+        "MediaStream:",
         stream
-      );
-
-      const videoTrack =
-        stream.getVideoTracks()[0];
-
-      if (!videoTrack) {
-        throw new Error(
-          "Nenhuma faixa de vídeo encontrada."
-        );
-      }
-
-      console.log(
-        "Track:",
-        videoTrack
-      );
-
-      console.log(
-        "Settings:",
-        videoTrack.getSettings()
       );
 
       localStream.current =
         stream;
 
-      videoTrack.addEventListener(
-        "ended",
-        () => {
-          stopSharing();
-        }
+      if (
+        localVideo.current
+      ) {
+        localVideo.current.srcObject =
+          stream;
+
+        await localVideo.current.play()
+          .catch(() => {});
+      }
+
+      const videoTracks =
+        stream.getVideoTracks();
+
+      console.log(
+        "VIDEO TRACKS:",
+        videoTracks
       );
+
+      if (
+        videoTracks.length
+      ) {
+        console.log(
+          "VIDEO TRACK:",
+          videoTracks[0]
+        );
+
+        console.log(
+          "TRACK SETTINGS:",
+          videoTracks[0].getSettings()
+        );
+
+        console.log(
+          "TRACK STATE:",
+          videoTracks[0].readyState
+        );
+
+        videoTracks[0].addEventListener(
+          "ended",
+          stopSharing
+        );
+      }
 
       setSharing(true);
 
       setWatching(false);
 
       send({
-        type: "start-sharing",
+        type:
+          "start-sharing"
       });
 
       setStatus(
         "Você está transmitindo"
       );
-    } catch (error) {
+
+      console.log(
+        "TRANSMISSÃO INICIADA"
+      );
+
+    } catch (e) {
       console.error(
-        "Captura:",
-        error
+        "Erro captura:",
+        e
       );
 
       if (
-        error?.name !==
+        e?.name !==
         "NotAllowedError"
       ) {
         setError(
-          error?.message ||
-            "Não foi possível capturar a tela."
+          "Não foi possível iniciar a captura."
         );
       }
     }
   }
 
-  /*
-   * ==========================================
-   * PARAR
-   * ==========================================
-   */
+  /* ========================================
+     STOP
+  ======================================== */
 
   function stopSharing() {
     localStream.current
       ?.getTracks()
       .forEach(
-        (track) => {
-          track.stop();
-        }
+        track =>
+          track.stop()
       );
 
     localStream.current =
@@ -680,53 +566,50 @@ function App() {
       WebSocket.OPEN
     ) {
       send({
-        type: "stop-sharing",
+        type:
+          "stop-sharing"
       });
     }
 
     setSharing(false);
 
     setWatching(false);
-
-    setStatus(
-      inRoom
-        ? `Sala ${roomId}`
-        : "Fora da sala"
-    );
   }
 
-  /*
-   * ==========================================
-   * REQUEST OFFER
-   * ==========================================
-   */
+  /* ========================================
+     REQUEST OFFER
+  ======================================== */
 
   function requestOffer(
     producerId
   ) {
     send({
-      type: "request-offer",
-      producerId,
+      type:
+        "request-offer",
+      producerId
     });
   }
 
-  /*
-   * ==========================================
-   * PRODUTOR
-   * ==========================================
-   */
+  /* ========================================
+     CREATE PEER
+  ======================================== */
 
   async function createPeer(
     viewerId
   ) {
+    console.log(
+      "Criando Peer para:",
+      viewerId
+    );
+
+    const iceServers =
+      await getIceServers();
+
     const pc =
       new RTCPeerConnection({
-        iceServers: [
-          {
-            urls:
-              "stun:stun.l.google.com:19302",
-          },
-        ],
+        iceServers,
+        iceTransportPolicy:
+          "all"
       });
 
     peerConnections.current.set(
@@ -734,10 +617,34 @@ function App() {
       pc
     );
 
+    pc.oniceconnectionstatechange =
+      () => {
+        console.log(
+          "ICE:",
+          pc.iceConnectionState
+        );
+      };
+
+    pc.onconnectionstatechange =
+      () => {
+        console.log(
+          "WebRTC:",
+          pc.connectionState
+        );
+      };
+
+    pc.onicegatheringstatechange =
+      () => {
+        console.log(
+          "ICE gathering:",
+          pc.iceGatheringState
+        );
+      };
+
     localStream.current
       ?.getTracks()
       .forEach(
-        (track) => {
+        track => {
           pc.addTrack(
             track,
             localStream.current
@@ -746,22 +653,19 @@ function App() {
       );
 
     pc.onicecandidate =
-      ({ candidate }) => {
-        if (candidate) {
+      ({
+        candidate
+      }) => {
+        if (
+          candidate
+        ) {
           send({
             type: "ice",
-            target: viewerId,
-            candidate,
+            target:
+              viewerId,
+            candidate
           });
         }
-      };
-
-    pc.onconnectionstatechange =
-      () => {
-        console.log(
-          "Producer connection:",
-          pc.connectionState
-        );
       };
 
     const offer =
@@ -773,28 +677,38 @@ function App() {
 
     send({
       type: "offer",
-      target: viewerId,
-      offer,
+      target:
+        viewerId,
+      offer
     });
+
+    console.log(
+      "Offer enviada"
+    );
+
+    return pc;
   }
 
-  /*
-   * ==========================================
-   * ESPECTADOR
-   * ==========================================
-   */
+  /* ========================================
+     HANDLE OFFER
+  ======================================== */
 
   async function handleOffer(
     msg
   ) {
+    console.log(
+      "Recebendo offer:",
+      msg
+    );
+
+    const iceServers =
+      await getIceServers();
+
     const pc =
       new RTCPeerConnection({
-        iceServers: [
-          {
-            urls:
-              "stun:stun.l.google.com:19302",
-          },
-        ],
+        iceServers,
+        iceTransportPolicy:
+          "all"
       });
 
     peerConnections.current.set(
@@ -802,10 +716,36 @@ function App() {
       pc
     );
 
-    pc.ontrack =
-      ({ streams }) => {
+    pc.oniceconnectionstatechange =
+      () => {
         console.log(
-          "Track recebida:",
+          "VIEWER ICE:",
+          pc.iceConnectionState
+        );
+      };
+
+    pc.onconnectionstatechange =
+      () => {
+        console.log(
+          "VIEWER CONNECTION:",
+          pc.connectionState
+        );
+      };
+
+    pc.onicegatheringstatechange =
+      () => {
+        console.log(
+          "VIEWER GATHERING:",
+          pc.iceGatheringState
+        );
+      };
+
+    pc.ontrack =
+      ({
+        streams
+      }) => {
+        console.log(
+          "TRACK RECEBIDA:",
           streams
         );
 
@@ -816,33 +756,32 @@ function App() {
           remoteVideo.current.srcObject =
             streams[0];
 
-          setWatching(true);
-
           remoteVideo.current
             .play()
             .catch(
               console.warn
             );
+
+          setWatching(
+            true
+          );
         }
       };
 
     pc.onicecandidate =
-      ({ candidate }) => {
-        if (candidate) {
+      ({
+        candidate
+      }) => {
+        if (
+          candidate
+        ) {
           send({
             type: "ice",
-            target: msg.from,
-            candidate,
+            target:
+              msg.from,
+            candidate
           });
         }
-      };
-
-    pc.onconnectionstatechange =
-      () => {
-        console.log(
-          "Viewer connection:",
-          pc.connectionState
-        );
       };
 
     await pc.setRemoteDescription(
@@ -858,21 +797,27 @@ function App() {
 
     send({
       type: "answer",
-      target: msg.from,
-      answer,
+      target:
+        msg.from,
+      answer
     });
+
+    console.log(
+      "Answer enviada"
+    );
   }
 
-  /*
-   * ==========================================
-   * UI
-   * ==========================================
-   */
+  /* ========================================
+     UI
+  ======================================== */
 
   return (
     <main className="app">
+
       <header className="topbar">
+
         <div>
+
           <span className="eyebrow">
             DISCORD ACTIVITY
           </span>
@@ -880,223 +825,172 @@ function App() {
           <h1>
             ScreenCast
           </h1>
+
         </div>
 
         <div className="status">
+
           <span
             className={
-              discordReady
-                ? "dot on"
-                : "dot"
+              `dot ${
+                discordReady
+                  ? "on"
+                  : ""
+              }`
             }
           />
 
           {status}
+
         </div>
+
       </header>
 
-      {!inRoom ? (
-        <section className="room-screen">
-          <div className="room-box">
-            <span className="eyebrow">
-              SCREENSCAST
-            </span>
+      <section className="stage">
 
-            <h2>
-              Entre em uma sala
-            </h2>
+        <div className="video-card">
 
-            <p>
-              Crie uma sala nova ou
-              entre em uma sala existente.
-            </p>
+          {watching ? (
+
+            <video
+              ref={
+                remoteVideo
+              }
+              autoPlay
+              playsInline
+              controls
+            />
+
+          ) : sharing ? (
+
+            <video
+              ref={
+                localVideo
+              }
+              autoPlay
+              muted
+              playsInline
+            />
+
+          ) : (
+
+            <div className="empty">
+
+              <div className="screen-icon">
+                ▣
+              </div>
+
+              <h2>
+                Nenhuma transmissão
+              </h2>
+
+              <p>
+                Inicie uma transmissão
+                para que as pessoas
+                possam assistir.
+              </p>
+
+            </div>
+
+          )}
+
+          <div className="live-badge">
+
+            {sharing
+              ? "● AO VIVO"
+              : watching
+                ? "● ASSISTINDO"
+                : "○ OFFLINE"}
+
+          </div>
+
+        </div>
+
+        <aside className="panel">
+
+          <h2>
+            ScreenCast
+          </h2>
+
+          <p className="muted">
+            Compartilhe sua tela
+            com as pessoas da sala.
+          </p>
+
+          {!sharing ? (
 
             <button
               className="primary"
               onClick={
-                createRoom
+                startSharing
               }
             >
-              Criar sala
+              🖥️ Compartilhar tela
             </button>
 
-            <div className="separator">
-              OU
-            </div>
-
-            <input
-              value={roomInput}
-              onChange={(event) =>
-                setRoomInput(
-                  event.target.value
-                )
-              }
-              placeholder="Código da sala"
-              maxLength={6}
-              onKeyDown={(event) => {
-                if (
-                  event.key ===
-                  "Enter"
-                ) {
-                  joinRoom();
-                }
-              }}
-            />
+          ) : (
 
             <button
-              className="secondary"
+              className="danger"
               onClick={
-                joinRoom
+                stopSharing
               }
             >
-              Entrar na sala
+              ■ Parar transmissão
             </button>
 
-            {error && (
-              <div className="error">
-                {error}
-              </div>
-            )}
-          </div>
-        </section>
-      ) : (
-        <section className="stage">
-          <div className="video-card">
-            {watching ? (
-              <video
-                ref={remoteVideo}
-                autoPlay
-                playsInline
-                controls
-              />
-            ) : sharing ? (
-              <video
-                ref={localVideo}
-                autoPlay
-                muted
-                playsInline
-                style={{
-                  width:
-                    "100%",
-                  height:
-                    "100%",
-                  objectFit:
-                    "contain",
-                  background:
-                    "#000",
-                }}
-              />
-            ) : (
-              <div className="empty">
-                <div className="screen-icon">
-                  ▣
-                </div>
+          )}
 
-                <h2>
-                  Nenhuma transmissão
-                </h2>
+          <div className="stats">
 
-                <p>
-                  Inicie uma transmissão
-                  para que as pessoas
-                  da sala possam assistir.
-                </p>
-              </div>
-            )}
-
-            <div className="live-badge">
-              {sharing
-                ? "● AO VIVO"
-                : watching
-                ? "● ASSISTINDO"
-                : "○ OFFLINE"}
-            </div>
-          </div>
-
-          <aside className="panel">
-            <h2>
-              ScreenCast
-            </h2>
-
-            <div className="room-code">
-              <span>
-                SALA
-              </span>
+            <div>
 
               <strong>
-                {roomId}
+                {viewerCount}
               </strong>
+
+              <span>
+                pessoas na sala
+              </span>
+
             </div>
 
-            <p className="muted">
-              Compartilhe sua tela
-              com as pessoas desta
-              sala.
-            </p>
+            <div>
 
-            {!sharing ? (
-              <button
-                className="primary"
-                onClick={
-                  startSharing
-                }
-              >
-                🖥️ Compartilhar tela
-              </button>
-            ) : (
-              <button
-                className="danger"
-                onClick={
-                  stopSharing
-                }
-              >
-                ■ Parar transmissão
-              </button>
-            )}
-
-            <div className="stats">
-              <div>
-                <strong>
-                  {viewerCount}
-                </strong>
-
-                <span>
-                  espectadores
-                </span>
-              </div>
-
-              <div>
-                <strong>
-                  {sharing
-                    ? "Você"
-                    : watching
+              <strong>
+                {sharing
+                  ? "Você"
+                  : watching
                     ? "Ao vivo"
                     : "—"}
-                </strong>
+              </strong>
 
-                <span>
-                  transmissão
-                </span>
-              </div>
+              <span>
+                transmissão
+              </span>
+
             </div>
 
-            {error && (
-              <div className="error">
-                {error}
-              </div>
-            )}
+          </div>
 
-            <button
-              className="secondary"
-              onClick={
-                leaveRoom
-              }
-            >
-              Sair da sala
-            </button>
-          </aside>
-        </section>
-      )}
+          {error && (
+
+            <div className="error">
+              {error}
+            </div>
+
+          )}
+
+          <small>
+            A captura começa depois
+            que você escolher uma
+            tela, janela ou aba.
+          </small>
+
+        </aside>
+
+      </section>
+
     </main>
   );
 }
