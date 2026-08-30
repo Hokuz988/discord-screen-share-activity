@@ -40,13 +40,14 @@ async function getIceServers() {
 
   try {
 
-    const response = await fetch(
-      `${TURN_SERVER_URL}/turn-credentials`,
-      {
-        method: "GET",
-        cache: "no-store"
-      }
-    );
+    const response =
+      await fetch(
+        `${TURN_SERVER_URL}/turn-credentials`,
+        {
+          method: "GET",
+          cache: "no-store"
+        }
+      );
 
     if (!response.ok) {
       throw new Error(
@@ -180,6 +181,15 @@ function App() {
     useRef(new Map());
 
   /*
+   * producerId -> Set<HTMLVideoElement>
+   *
+   * Evita reanexar a mesma stream
+   * várias vezes.
+   */
+  const attachedStreams =
+    useRef(new WeakMap());
+
+  /*
    * local->viewer
    * producer->local
    */
@@ -206,7 +216,195 @@ function App() {
 
   /* =========================================================
      VIDEO
-  ========================================================= */
+========================================================= */
+
+  function playVideoSafely(video) {
+
+    if (!video) {
+      return;
+    }
+
+    /*
+     * Não chama play enquanto o elemento
+     * ainda está carregando outra coisa.
+     */
+    if (
+      video.readyState <
+      HTMLMediaElement.HAVE_METADATA
+    ) {
+
+      return;
+    }
+
+    const promise =
+      video.play();
+
+    if (
+      promise &&
+      typeof promise.catch ===
+        "function"
+    ) {
+
+      promise.catch(error => {
+
+        /*
+         * AbortError normalmente significa
+         * que o srcObject mudou durante o play.
+         * Não é necessário ficar tentando
+         * infinitamente.
+         */
+        if (
+          error?.name ===
+          "AbortError"
+        ) {
+
+          return;
+        }
+
+        console.warn(
+          "[VIDEO] play:",
+          error
+        );
+      });
+    }
+  }
+
+  function attachStreamToVideo(
+    producerId,
+    video,
+    stream
+  ) {
+
+    if (
+      !video ||
+      !stream
+    ) {
+      return;
+    }
+
+    /*
+     * Se o elemento já possui exatamente
+     * essa stream, não mexe nele.
+     */
+    if (
+      video.srcObject ===
+      stream
+    ) {
+
+      /*
+       * Se já carregou, apenas garante
+       * que está tocando.
+       */
+      if (
+        video.readyState >=
+        HTMLMediaElement.HAVE_METADATA
+      ) {
+
+        playVideoSafely(
+          video
+        );
+      }
+
+      return;
+    }
+
+    console.log(
+      "[VIDEO] anexando stream:",
+      producerId
+    );
+
+    /*
+     * Primeiro configura o elemento.
+     */
+    video.autoplay =
+      true;
+
+    video.playsInline =
+      true;
+
+    video.setAttribute(
+      "playsinline",
+      ""
+    );
+
+    if (
+      producerId ===
+      "local"
+    ) {
+
+      video.muted =
+        true;
+
+    } else {
+
+      video.muted =
+        !(
+          audioStates[
+            producerId
+          ] ?? false
+        );
+    }
+
+    video.volume =
+      1;
+
+    /*
+     * Marca a stream atual.
+     */
+    attachedStreams.current.set(
+      video,
+      stream
+    );
+
+    /*
+     * Só agora atribui srcObject.
+     */
+    video.srcObject =
+      stream;
+
+    /*
+     * O evento loadedmetadata garante
+     * que o navegador terminou de
+     * preparar o vídeo antes do play.
+     */
+    const onLoadedMetadata =
+      () => {
+
+        console.log(
+          "[VIDEO] metadata carregada:",
+          producerId,
+          video.videoWidth,
+          "x",
+          video.videoHeight
+        );
+
+        playVideoSafely(
+          video
+        );
+      };
+
+    video.addEventListener(
+      "loadedmetadata",
+      onLoadedMetadata,
+      {
+        once: true
+      }
+    );
+
+    /*
+     * Alguns navegadores podem já ter
+     * metadata disponível.
+     */
+    if (
+      video.readyState >=
+      HTMLMediaElement.HAVE_METADATA
+    ) {
+
+      playVideoSafely(
+        video
+      );
+    }
+  }
 
   function registerVideo(
     producerId,
@@ -235,14 +433,24 @@ function App() {
 
     set.add(element);
 
-    element.autoplay = true;
-    element.playsInline = true;
+    element.autoplay =
+      true;
+
+    element.playsInline =
+      true;
+
+    element.setAttribute(
+      "playsinline",
+      ""
+    );
 
     if (
-      producerId === "local"
+      producerId ===
+      "local"
     ) {
 
-      element.muted = true;
+      element.muted =
+        true;
 
     } else {
 
@@ -254,7 +462,8 @@ function App() {
         );
     }
 
-    element.volume = 1;
+    element.volume =
+      1;
 
     const stream =
       streams.current.get(
@@ -263,33 +472,11 @@ function App() {
 
     if (stream) {
 
-      if (
-        element.srcObject !== stream
-      ) {
-
-        element.srcObject =
-          stream;
-      }
-
-      /*
-       * NÃO chama play repetidamente.
-       * autoplay cuida disso.
-       */
-      element.play()
-        .catch(error => {
-
-          if (
-            error?.name !==
-            "AbortError"
-          ) {
-
-            console.warn(
-              "[VIDEO] play:",
-              error
-            );
-          }
-
-        });
+      attachStreamToVideo(
+        producerId,
+        element,
+        stream
+      );
     }
   }
 
@@ -311,9 +498,13 @@ function App() {
       return;
     }
 
-    set.delete(element);
+    set.delete(
+      element
+    );
 
-    if (set.size === 0) {
+    if (
+      set.size === 0
+    ) {
 
       videoRefs.current.delete(
         producerId
@@ -329,6 +520,15 @@ function App() {
     if (!stream) {
       return;
     }
+
+    console.log(
+      "[VIDEO] attachStream:",
+      producerId,
+      stream.getTracks().map(
+        track =>
+          `${track.kind}:${track.readyState}`
+      )
+    );
 
     streams.current.set(
       producerId,
@@ -349,59 +549,11 @@ function App() {
       of videos
     ) {
 
-      if (!video) {
-        continue;
-      }
-
-      if (
-        video.srcObject !==
+      attachStreamToVideo(
+        producerId,
+        video,
         stream
-      ) {
-
-        video.srcObject =
-          stream;
-      }
-
-      video.autoplay = true;
-      video.playsInline = true;
-
-      if (
-        producerId === "local"
-      ) {
-
-        video.muted = true;
-
-      } else {
-
-        video.muted =
-          !(
-            audioStates[
-              producerId
-            ] ?? false
-          );
-      }
-
-      video.volume = 1;
-
-      /*
-       * Apenas tenta tocar depois
-       * de colocar a stream.
-       */
-      video.play()
-        .catch(error => {
-
-          if (
-            error?.name !==
-            "AbortError"
-          ) {
-
-            console.warn(
-              "[VIDEO] play:",
-              error
-            );
-          }
-
-        });
+      );
     }
   }
 
@@ -430,13 +582,17 @@ function App() {
         video.srcObject =
           null;
 
+        attachedStreams.current.delete(
+          video
+        );
+
       } catch {}
     }
   }
 
   /* =========================================================
      DISCORD
-  ========================================================= */
+========================================================= */
 
   useEffect(() => {
 
@@ -468,7 +624,9 @@ function App() {
           return;
         }
 
-        setDiscordReady(true);
+        setDiscordReady(
+          true
+        );
 
         setStatus(
           "Conectado ao Discord"
@@ -509,7 +667,7 @@ function App() {
 
   /* =========================================================
      WEBSOCKET
-  ========================================================= */
+========================================================= */
 
   function connectSignal() {
 
@@ -621,13 +779,23 @@ function App() {
             roomId.current =
               code;
 
-            setRoomCode(code);
-            setCurrentRoom(code);
-            setInRoom(true);
+            setRoomCode(
+              code
+            );
+
+            setCurrentRoom(
+              code
+            );
+
+            setInRoom(
+              true
+            );
 
             requestedOffers.current.clear();
 
-            setProducers([]);
+            setProducers(
+              []
+            );
 
             setSelectedProducer(
               "local"
@@ -661,13 +829,23 @@ function App() {
             roomId.current =
               code;
 
-            setRoomCode(code);
-            setCurrentRoom(code);
-            setInRoom(true);
+            setRoomCode(
+              code
+            );
+
+            setCurrentRoom(
+              code
+            );
+
+            setInRoom(
+              true
+            );
 
             requestedOffers.current.clear();
 
-            setProducers([]);
+            setProducers(
+              []
+            );
 
             setSelectedProducer(
               "local"
@@ -701,13 +879,14 @@ function App() {
             const remote =
               list
                 .map(
-                  id => String(id)
+                  id =>
+                    String(id)
                 )
                 .filter(
                   id =>
                     id &&
                     id !==
-                      myId.current
+                    myId.current
                 )
                 .slice(
                   0,
@@ -719,7 +898,9 @@ function App() {
               remote
             );
 
-            setProducers(remote);
+            setProducers(
+              remote
+            );
 
             setSelectedProducer(
               current => {
@@ -1097,12 +1278,28 @@ function App() {
       "";
 
     setRoomCode("");
+
     setCurrentRoom("");
-    setInRoom(false);
-    setSharing(false);
-    setProducers([]);
-    setSelectedProducer("local");
-    setViewerCount(0);
+
+    setInRoom(
+      false
+    );
+
+    setSharing(
+      false
+    );
+
+    setProducers(
+      []
+    );
+
+    setSelectedProducer(
+      "local"
+    );
+
+    setViewerCount(
+      0
+    );
 
     setStatus(
       "Servidor conectado"
@@ -1127,7 +1324,6 @@ function App() {
     }
 
     if (sharing) {
-
       return;
     }
 
@@ -1190,16 +1386,14 @@ function App() {
         })
       );
 
-      setSharing(true);
+      setSharing(
+        true
+      );
 
       setSelectedProducer(
         "local"
       );
 
-      /*
-       * Registra o produtor DEPOIS
-       * que a captura realmente existe.
-       */
       const sent =
         send({
           type:
@@ -1222,7 +1416,9 @@ function App() {
           "local"
         );
 
-        setSharing(false);
+        setSharing(
+          false
+        );
 
         setError(
           "Servidor de sinalização não está conectado."
@@ -1261,6 +1457,10 @@ function App() {
         stream.getAudioTracks().length
       );
 
+      /*
+       * O React vai montar os vídeos
+       * e registerVideo irá anexar a stream.
+       */
       attachStream(
         "local",
         stream
@@ -1293,9 +1493,6 @@ function App() {
 
   function stopSharing() {
 
-    /*
-     * Evita chamadas duplicadas.
-     */
     if (
       !localStream.current &&
       !sharing
@@ -1308,9 +1505,6 @@ function App() {
       "[SCREEN] parando..."
     );
 
-    /*
-     * Primeiro avisa o servidor.
-     */
     if (
       ws.current &&
       ws.current.readyState ===
@@ -1324,9 +1518,6 @@ function App() {
       });
     }
 
-    /*
-     * Fecha peers onde somos produtor.
-     */
     for (
       const [
         key,
@@ -1355,9 +1546,6 @@ function App() {
       }
     }
 
-    /*
-     * Para captura.
-     */
     if (
       localStream.current
     ) {
@@ -1385,7 +1573,9 @@ function App() {
       "local"
     );
 
-    setSharing(false);
+    setSharing(
+      false
+    );
 
     setAudioStates(
       current => {
@@ -1531,9 +1721,6 @@ function App() {
       pc
     );
 
-    /*
-     * Adiciona TODAS as tracks.
-     */
     for (
       const track
       of localStream.current.getTracks()
@@ -1679,10 +1866,6 @@ function App() {
       producerId
     );
 
-    /*
-     * Se já existe conexão ativa,
-     * não cria outra.
-     */
     const old =
       peerConnections.current.get(
         key
@@ -1721,23 +1904,20 @@ function App() {
       pc
     );
 
-    /*
-     * TRACK
-     */
+    /* =======================================================
+       TRACK
+    ======================================================= */
+
     pc.ontrack =
       event => {
 
         console.log(
           "[VIEWER] TRACK:",
           producerId,
-          event.track.kind
+          event.track.kind,
+          event.track.readyState
         );
 
-        /*
-         * O browser normalmente
-         * entrega o MediaStream
-         * diretamente no event.
-         */
         let stream =
           event.streams?.[0];
 
@@ -1777,6 +1957,10 @@ function App() {
 
         } else {
 
+          /*
+           * Usa a stream original entregue
+           * pelo WebRTC.
+           */
           streams.current.set(
             producerId,
             stream
@@ -1791,6 +1975,10 @@ function App() {
           )
         );
 
+        /*
+         * Anexa a stream aos vídeos
+         * existentes.
+         */
         attachStream(
           producerId,
           stream
@@ -2043,20 +2231,17 @@ function App() {
       return;
     }
 
-    /*
-     * VIEWER
-     */
     const viewerKey =
       `${producerId}->local`;
 
-    /*
-     * PRODUCER
-     */
     const producerKey =
       `local->${from}`;
 
-    let key = null;
-    let pc = null;
+    let key =
+      null;
+
+    let pc =
+      null;
 
     if (
       peerConnections.current.has(
@@ -2087,18 +2272,8 @@ function App() {
         );
     }
 
-    /*
-     * Peer ainda não existe.
-     */
     if (!pc) {
 
-      /*
-       * Para ICE recebido do produtor,
-       * o peer correto será viewerKey.
-       *
-       * Para ICE recebido do viewer,
-       * o peer correto será producerKey.
-       */
       const pendingKey =
         from ===
         producerId
@@ -2128,10 +2303,6 @@ function App() {
       return;
     }
 
-    /*
-     * Sem RemoteDescription:
-     * guarda para depois.
-     */
     if (
       !pc.remoteDescription
     ) {
@@ -2385,10 +2556,19 @@ function App() {
       video.volume =
         1;
 
-      if (next) {
+      /*
+       * Só tenta tocar se já tiver
+       * metadata carregada.
+       */
+      if (
+        next &&
+        video.readyState >=
+          HTMLMediaElement.HAVE_METADATA
+      ) {
 
-        video.play()
-          .catch(() => {});
+        playVideoSafely(
+          video
+        );
       }
     }
   }
@@ -2504,6 +2684,10 @@ function App() {
           video.srcObject =
             null;
 
+          attachedStreams.current.delete(
+            video
+          );
+
         } catch {}
       }
     }
@@ -2518,10 +2702,21 @@ function App() {
     roomId.current =
       "";
 
-    setSharing(false);
-    setProducers([]);
-    setSelectedProducer("local");
-    setViewerCount(0);
+    setSharing(
+      false
+    );
+
+    setProducers(
+      []
+    );
+
+    setSelectedProducer(
+      "local"
+    );
+
+    setViewerCount(
+      0
+    );
   }
 
   /* =========================================================
@@ -3072,3 +3267,4 @@ if (!root) {
 createRoot(root).render(
   <App />
 );
+
