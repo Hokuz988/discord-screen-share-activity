@@ -52,6 +52,7 @@ const MAX_PRODUCERS =
 app.get(
   "/",
   (_, res) => {
+
     res.json({
       ok: true,
 
@@ -67,11 +68,9 @@ app.get(
 app.get(
   "/health",
   (_, res) => {
+
     res.json({
       ok: true,
-
-      service:
-        "screencast-signaling",
 
       rooms:
         rooms.size,
@@ -89,7 +88,9 @@ app.get(
 app.get(
   "/turn-credentials",
   async (_, res) => {
+
     try {
+
       const keyId =
         process.env.TURN_KEY_ID;
 
@@ -100,11 +101,16 @@ app.get(
         !keyId ||
         !apiToken
       ) {
+
+        console.error(
+          "[TURN] variáveis ausentes"
+        );
+
         return res
           .status(500)
           .json({
             error:
-              "TURN não configurado no servidor"
+              "TURN não configurado."
           });
       }
 
@@ -134,11 +140,17 @@ app.get(
       const data =
         await response.json();
 
+      console.log(
+        "[TURN] Cloudflare:",
+        response.status
+      );
+
       if (
         !response.ok
       ) {
+
         console.error(
-          "Erro Cloudflare TURN:",
+          "[TURN] erro:",
           data
         );
 
@@ -146,84 +158,112 @@ app.get(
           .status(500)
           .json({
             error:
-              "Não foi possível gerar credenciais TURN"
+              "Erro ao gerar TURN."
           });
       }
 
-      res.json(
+      return res.json(
         data
       );
+
     } catch (error) {
+
       console.error(
-        "Erro ao gerar TURN:",
+        "[TURN] exception:",
         error
       );
 
-      res
+      return res
         .status(500)
         .json({
           error:
-            "Erro interno ao gerar TURN"
+            "Erro interno TURN."
         });
     }
   }
 );
 
 /* =========================================================
-   UTILIDADES
+   SEND
 ========================================================= */
 
 function send(
   ws,
   message
 ) {
+
   if (
-    ws &&
-    ws.readyState === 1
+    !ws ||
+    ws.readyState !==
+      1
   ) {
-    try {
-      ws.send(
-        JSON.stringify(
-          message
-        )
-      );
-    } catch (error) {
-      console.error(
-        "Erro enviando WebSocket:",
-        error
-      );
-    }
+
+    return false;
+  }
+
+  try {
+
+    ws.send(
+      JSON.stringify(
+        message
+      )
+    );
+
+    return true;
+
+  } catch (error) {
+
+    console.error(
+      "[SEND ERROR]",
+      error
+    );
+
+    return false;
   }
 }
+
+/* =========================================================
+   BROADCAST
+========================================================= */
 
 function broadcast(
   room,
   message,
   except = null
 ) {
+
   if (!room) {
     return;
   }
 
   for (
-    const client of
-    room.clients
+    const client
+    of room.clients
   ) {
+
     if (
-      client !== except &&
-      client.readyState === 1
+      client ===
+      except
     ) {
-      send(
-        client,
-        message
-      );
+
+      continue;
     }
+
+    send(
+      client,
+      message
+    );
   }
 }
+
+/* =========================================================
+   PRODUCERS
+========================================================= */
 
 function getProducerList(
   room
 ) {
+
   if (!room) {
     return [];
   }
@@ -236,9 +276,6 @@ function getProducerList(
 function updateProducerList(
   room
 ) {
-  if (!room) {
-    return;
-  }
 
   const producers =
     getProducerList(
@@ -246,7 +283,7 @@ function updateProducerList(
     );
 
   console.log(
-    `[ROOM] ${room.id} produtores:`,
+    `[ROOM ${room.id}] producers:`,
     producers
   );
 
@@ -261,9 +298,14 @@ function updateProducerList(
   );
 }
 
-function viewerCount(
+/* =========================================================
+   VIEWER COUNT
+========================================================= */
+
+function getViewerCount(
   room
 ) {
+
   if (!room) {
     return 0;
   }
@@ -278,9 +320,6 @@ function viewerCount(
 function updateViewerCount(
   room
 ) {
-  if (!room) {
-    return;
-  }
 
   broadcast(
     room,
@@ -289,29 +328,36 @@ function updateViewerCount(
         "viewer-count",
 
       count:
-        viewerCount(
+        getViewerCount(
           room
         )
     }
   );
 }
 
+/* =========================================================
+   FIND CLIENT
+========================================================= */
+
 function findClient(
   room,
   id
 ) {
+
   if (!room) {
     return null;
   }
 
   for (
-    const client of
-    room.clients
+    const client
+    of room.clients
   ) {
+
     if (
       client.id ===
       id
     ) {
+
       return client;
     }
   }
@@ -319,7 +365,12 @@ function findClient(
   return null;
 }
 
+/* =========================================================
+   ROOM CODE
+========================================================= */
+
 function generateRoomCode() {
+
   const characters =
     "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
@@ -331,6 +382,7 @@ function generateRoomCode() {
     i < 6;
     i++
   ) {
+
     code +=
       characters[
         Math.floor(
@@ -344,26 +396,31 @@ function generateRoomCode() {
 }
 
 function createRoomCode() {
+
   let code;
 
   do {
+
     code =
       generateRoomCode();
+
   } while (
-    rooms.has(code)
+    rooms.has(
+      code
+    )
   );
 
   return code;
 }
 
 /* =========================================================
-   REMOVER PRODUTOR
+   REMOVE PRODUCER
 ========================================================= */
 
 function removeProducer(
-  ws,
-  notify = true
+  ws
 ) {
+
   const room =
     ws.room;
 
@@ -376,6 +433,7 @@ function removeProducer(
       ws.id
     )
   ) {
+
     return;
   }
 
@@ -387,39 +445,38 @@ function removeProducer(
     false;
 
   console.log(
-    `[PRODUCER] ${ws.id} parou de transmitir em ${room.id}`
+    `[PRODUCER] ${ws.id} parou em ${room.id}`
   );
 
-  if (notify) {
-    broadcast(
-      room,
-      {
-        type:
-          "producer-left",
+  broadcast(
+    room,
+    {
+      type:
+        "producer-left",
 
-        producerId:
-          ws.id
-      },
-      ws
-    );
+      producerId:
+        ws.id
+    },
+    ws
+  );
 
-    updateProducerList(
-      room
-    );
+  updateProducerList(
+    room
+  );
 
-    updateViewerCount(
-      room
-    );
-  }
+  updateViewerCount(
+    room
+  );
 }
 
 /* =========================================================
-   SAIR DA SALA
+   LEAVE ROOM
 ========================================================= */
 
 function leaveRoom(
   ws
 ) {
+
   const room =
     ws.room;
 
@@ -428,7 +485,7 @@ function leaveRoom(
   }
 
   console.log(
-    `[ROOM] ${ws.id} saindo de ${room.id}`
+    `[ROOM] ${ws.id} saiu de ${room.id}`
   );
 
   if (
@@ -436,6 +493,7 @@ function leaveRoom(
       ws.id
     )
   ) {
+
     room.producers.delete(
       ws.id
     );
@@ -478,12 +536,13 @@ function leaveRoom(
     room.clients.size ===
     0
   ) {
+
     rooms.delete(
       room.id
     );
 
     console.log(
-      `[ROOM] Sala removida: ${room.id}`
+      `[ROOM] removida: ${room.id}`
     );
   }
 }
@@ -495,6 +554,7 @@ function leaveRoom(
 wss.on(
   "connection",
   ws => {
+
     ws.id =
       crypto.randomUUID();
 
@@ -526,34 +586,40 @@ wss.on(
     ws.on(
       "message",
       raw => {
+
         let msg;
 
         try {
+
           msg =
             JSON.parse(
               raw.toString()
             );
+
         } catch {
+
           console.warn(
-            "[ERROR] JSON inválido"
+            "[MESSAGE] JSON inválido"
           );
 
           return;
         }
 
         console.log(
-          `[MESSAGE] ${ws.id} -> ${msg.type}`
+          `[MESSAGE] ${ws.id}: ${msg.type}`
         );
 
         /* =================================================
-           CRIAR SALA
+           CREATE ROOM
         ================================================= */
 
         if (
           msg.type ===
           "create-room"
         ) {
+
           if (ws.room) {
+
             leaveRoom(
               ws
             );
@@ -563,6 +629,7 @@ wss.on(
             createRoomCode();
 
           const room = {
+
             id:
               roomId,
 
@@ -618,20 +685,21 @@ wss.on(
           );
 
           console.log(
-            `[ROOM] Criada: ${roomId}`
+            `[ROOM] criada: ${roomId}`
           );
 
           return;
         }
 
         /* =================================================
-           ENTRAR
+           JOIN ROOM
         ================================================= */
 
         if (
           msg.type ===
           "join-room"
         ) {
+
           const roomId =
             String(
               msg.roomId ||
@@ -641,6 +709,7 @@ wss.on(
               .toUpperCase();
 
           if (!roomId) {
+
             send(
               ws,
               {
@@ -661,6 +730,7 @@ wss.on(
             );
 
           if (!room) {
+
             send(
               ws,
               {
@@ -676,6 +746,7 @@ wss.on(
           }
 
           if (ws.room) {
+
             leaveRoom(
               ws
             );
@@ -699,8 +770,9 @@ wss.on(
           );
 
           /*
-           * Envia produtores existentes
-           * diretamente para o novo cliente.
+           * ESSENCIAL:
+           * envia produtores existentes
+           * imediatamente para o novo viewer.
            */
           send(
             ws,
@@ -722,15 +794,12 @@ wss.on(
                 "viewer-count",
 
               count:
-                viewerCount(
+                getViewerCount(
                   room
                 )
             }
           );
 
-          /*
-           * Atualiza os clientes antigos.
-           */
           broadcast(
             room,
             {
@@ -745,18 +814,8 @@ wss.on(
             ws
           );
 
-          broadcast(
-            room,
-            {
-              type:
-                "viewer-count",
-
-              count:
-                viewerCount(
-                  room
-                )
-            },
-            ws
+          updateViewerCount(
+            room
           );
 
           console.log(
@@ -767,13 +826,14 @@ wss.on(
         }
 
         /* =================================================
-           SAIR
+           LEAVE
         ================================================= */
 
         if (
           msg.type ===
           "leave-room"
         ) {
+
           leaveRoom(
             ws
           );
@@ -790,17 +850,19 @@ wss.on(
         }
 
         /* =================================================
-           COMEÇAR TRANSMISSÃO
+           START SHARING
         ================================================= */
 
         if (
           msg.type ===
           "start-sharing"
         ) {
+
           const room =
             ws.room;
 
           if (!room) {
+
             send(
               ws,
               {
@@ -820,16 +882,6 @@ wss.on(
               ws.id
             )
           ) {
-            send(
-              ws,
-              {
-                type:
-                  "error",
-
-                message:
-                  "Você já está transmitindo."
-              }
-            );
 
             return;
           }
@@ -838,6 +890,7 @@ wss.on(
             room.producers.size >=
             MAX_PRODUCERS
           ) {
+
             send(
               ws,
               {
@@ -853,7 +906,7 @@ wss.on(
           }
 
           /*
-           * REGISTRA O PRODUTOR.
+           * Registra produtor.
            */
           room.producers.set(
             ws.id,
@@ -864,11 +917,11 @@ wss.on(
             true;
 
           console.log(
-            `[PRODUCER] ${ws.id} transmitindo em ${room.id}`
+            `[PRODUCER] ${ws.id} começou em ${room.id}`
           );
 
           /*
-           * Avisa os outros.
+           * Avisa todos os outros.
            */
           broadcast(
             room,
@@ -883,7 +936,7 @@ wss.on(
           );
 
           /*
-           * Atualiza todos.
+           * Envia lista completa.
            */
           updateProducerList(
             room
@@ -897,13 +950,14 @@ wss.on(
         }
 
         /* =================================================
-           PARAR
+           STOP SHARING
         ================================================= */
 
         if (
           msg.type ===
           "stop-sharing"
         ) {
+
           removeProducer(
             ws
           );
@@ -919,6 +973,7 @@ wss.on(
           msg.type ===
           "request-offer"
         ) {
+
           const room =
             ws.room;
 
@@ -942,6 +997,7 @@ wss.on(
             );
 
           if (!producer) {
+
             send(
               ws,
               {
@@ -960,11 +1016,12 @@ wss.on(
             producer.id ===
             ws.id
           ) {
+
             return;
           }
 
           console.log(
-            `[SIGNAL] ${ws.id} pediu offer de ${producer.id}`
+            `[SIGNAL] request-offer ${ws.id} -> ${producer.id}`
           );
 
           send(
@@ -989,10 +1046,25 @@ wss.on(
           msg.type ===
           "offer"
         ) {
+
           const room =
             ws.room;
 
           if (!room) {
+            return;
+          }
+
+          if (
+            !room.producers.has(
+              ws.id
+            )
+          ) {
+
+            console.warn(
+              "[OFFER] remetente não é produtor:",
+              ws.id
+            );
+
             return;
           }
 
@@ -1013,22 +1085,10 @@ wss.on(
             );
 
           if (!target) {
+
             console.warn(
-              "Target da offer não encontrado:",
+              "[OFFER] target não encontrado:",
               targetId
-            );
-
-            return;
-          }
-
-          if (
-            !room.producers.has(
-              ws.id
-            )
-          ) {
-            console.warn(
-              "Offer rejeitada:",
-              ws.id
             );
 
             return;
@@ -1066,6 +1126,7 @@ wss.on(
           msg.type ===
           "answer"
         ) {
+
           const room =
             ws.room;
 
@@ -1090,8 +1151,9 @@ wss.on(
             );
 
           if (!target) {
+
             console.warn(
-              "Target da answer não encontrado:",
+              "[ANSWER] target não encontrado:",
               targetId
             );
 
@@ -1130,6 +1192,7 @@ wss.on(
           msg.type ===
           "ice"
         ) {
+
           const room =
             ws.room;
 
@@ -1168,13 +1231,20 @@ wss.on(
           }
 
           /*
-           * O produtor precisa existir.
+           * O producerId precisa ser um produtor
+           * REAL da sala.
            */
           if (
             !room.producers.has(
               producerId
             )
           ) {
+
+            console.warn(
+              "[ICE] produtor inválido:",
+              producerId
+            );
+
             return;
           }
 
@@ -1206,6 +1276,7 @@ wss.on(
     ws.on(
       "close",
       () => {
+
         console.log(
           `[DISCONNECT] ${ws.id}`
         );
@@ -1219,6 +1290,7 @@ wss.on(
     ws.on(
       "error",
       error => {
+
         console.error(
           `[WS ERROR] ${ws.id}`,
           error
@@ -1236,12 +1308,13 @@ server.listen(
   PORT,
   "0.0.0.0",
   () => {
+
     console.log(
       `ScreenCast server rodando na porta ${PORT}`
     );
 
     console.log(
-      `Máximo de transmissões por sala: ${MAX_PRODUCERS}`
+      `Máximo de produtores: ${MAX_PRODUCERS}`
     );
   }
 );

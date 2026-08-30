@@ -1,6 +1,17 @@
-import React, { useEffect, useRef, useState } from "react";
-import { createRoot } from "react-dom/client";
-import { DiscordSDK } from "@discord/embedded-app-sdk";
+import React, {
+  useEffect,
+  useRef,
+  useState
+} from "react";
+
+import {
+  createRoot
+} from "react-dom/client";
+
+import {
+  DiscordSDK
+} from "@discord/embedded-app-sdk";
+
 import "./style.css";
 
 /* =========================================================
@@ -26,38 +37,59 @@ let discordSdk = null;
 ========================================================= */
 
 async function getIceServers() {
+
   try {
-    const response = await fetch(
-      `${TURN_SERVER_URL}/turn-credentials`,
-      {
-        method: "GET",
-        cache: "no-store"
-      }
-    );
+
+    const response =
+      await fetch(
+        `${TURN_SERVER_URL}/turn-credentials`,
+        {
+          cache: "no-store"
+        }
+      );
 
     if (!response.ok) {
-      throw new Error(`TURN HTTP ${response.status}`);
+      throw new Error(
+        `TURN HTTP ${response.status}`
+      );
     }
 
-    const data = await response.json();
+    const data =
+      await response.json();
+
+    console.log(
+      "[TURN] resposta:",
+      data
+    );
 
     if (
       !data ||
       !Array.isArray(data.iceServers)
     ) {
-      throw new Error("TURN inválido.");
+
+      throw new Error(
+        "Resposta TURN inválida."
+      );
     }
 
     return data.iceServers;
-  } catch (error) {
-    console.warn("TURN indisponível:", error);
 
+  } catch (error) {
+
+    console.warn(
+      "[TURN] indisponível:",
+      error
+    );
+
+    /*
+     * STUN como fallback.
+     */
     return [
       {
-        urls: [
-          "stun:stun.cloudflare.com:3478",
-          "stun:stun.l.google.com:19302"
-        ]
+        urls: "stun:stun.cloudflare.com:3478"
+      },
+      {
+        urls: "stun:stun.l.google.com:19302"
       }
     ];
   }
@@ -68,167 +100,224 @@ async function getIceServers() {
 ========================================================= */
 
 function App() {
-  const [discordReady, setDiscordReady] =
-    useState(false);
 
-  const [status, setStatus] =
-    useState("Conectando...");
+  const [
+    discordReady,
+    setDiscordReady
+  ] = useState(false);
 
-  const [sharing, setSharing] =
-    useState(false);
+  const [
+    status,
+    setStatus
+  ] = useState(
+    "Conectando..."
+  );
 
-  const [roomCode, setRoomCode] =
-    useState("");
+  const [
+    sharing,
+    setSharing
+  ] = useState(false);
 
-  const [roomInput, setRoomInput] =
-    useState("");
+  const [
+    roomCode,
+    setRoomCode
+  ] = useState("");
 
-  const [currentRoom, setCurrentRoom] =
-    useState("");
+  const [
+    roomInput,
+    setRoomInput
+  ] = useState("");
 
-  const [inRoom, setInRoom] =
-    useState(false);
+  const [
+    currentRoom,
+    setCurrentRoom
+  ] = useState("");
 
-  const [error, setError] =
-    useState("");
+  const [
+    inRoom,
+    setInRoom
+  ] = useState(false);
 
-  const [viewerCount, setViewerCount] =
-    useState(0);
+  const [
+    error,
+    setError
+  ] = useState("");
 
-  const [producers, setProducers] =
-    useState([]);
+  const [
+    viewerCount,
+    setViewerCount
+  ] = useState(0);
 
-  const [selectedProducer, setSelectedProducer] =
-    useState("local");
+  const [
+    producers,
+    setProducers
+  ] = useState([]);
 
-  const [audioStates, setAudioStates] =
-    useState({});
+  const [
+    selectedProducer,
+    setSelectedProducer
+  ] = useState("local");
+
+  const [
+    audioStates,
+    setAudioStates
+  ] = useState({});
 
   /* =======================================================
      REFS
   ======================================================= */
 
-  const ws = useRef(null);
+  const ws =
+    useRef(null);
 
-  const localStream = useRef(null);
+  const localStream =
+    useRef(null);
 
   /*
    * producerId -> MediaStream
    */
-  const streams = useRef(new Map());
+  const streams =
+    useRef(new Map());
 
   /*
    * producerId -> Set<HTMLVideoElement>
    */
-  const videoRefs = useRef(new Map());
+  const videoRefs =
+    useRef(new Map());
 
   /*
-   * local->viewerId
-   * producerId->local
+   * local->viewer
+   * producer->local
    */
-  const peerConnections = useRef(new Map());
+  const peerConnections =
+    useRef(new Map());
 
   /*
-   * PeerConnection -> ICE pendente
+   * peerKey -> ICE candidates
    */
-  const pendingCandidates = useRef(new Map());
+  const pendingCandidates =
+    useRef(new Map());
 
   /*
-   * Evita pedir a mesma offer várias vezes.
+   * Evita request-offer duplicado.
    */
-  const requestedOffers = useRef(new Set());
+  const requestedOffers =
+    useRef(new Set());
 
-  const roomId = useRef("");
+  const roomId =
+    useRef("");
 
-  const myId = useRef("");
+  const myId =
+    useRef("");
 
   /* =======================================================
-     VIDEO REFS
+     VIDEO
   ======================================================= */
 
-  function setVideoRef(producerId, element) {
+  function registerVideo(
+    producerId,
+    element
+  ) {
+
     if (!element) {
       return;
     }
 
-    let elements =
-      videoRefs.current.get(producerId);
+    let set =
+      videoRefs.current.get(
+        producerId
+      );
 
-    if (!elements) {
-      elements = new Set();
+    if (!set) {
+
+      set =
+        new Set();
 
       videoRefs.current.set(
         producerId,
-        elements
+        set
       );
     }
 
-    elements.add(element);
-
-    const stream =
-      streams.current.get(producerId);
-
-    if (stream) {
-      element.srcObject = stream;
-    }
+    set.add(element);
 
     element.autoplay = true;
     element.playsInline = true;
 
-    if (producerId === "local") {
-      element.muted = true;
-    } else {
-      element.muted = !(
-        audioStates[producerId] ?? false
+    const stream =
+      streams.current.get(
+        producerId
       );
-    }
-
-    element.volume = 1;
 
     if (stream) {
-      element.play().catch(() => {});
+
+      element.srcObject =
+        stream;
+
+      if (
+        producerId === "local"
+      ) {
+
+        element.muted = true;
+
+      } else {
+
+        element.muted =
+          !(
+            audioStates[
+              producerId
+            ] ?? false
+          );
+      }
+
+      element.volume = 1;
+
+      element.play()
+        .catch(
+          error => {
+
+            console.warn(
+              "[VIDEO] autoplay bloqueado:",
+              error
+            );
+          }
+        );
     }
   }
 
-  function removeVideoRef(
+  function unregisterVideo(
     producerId,
     element
   ) {
+
     if (!element) {
       return;
     }
 
-    const elements =
-      videoRefs.current.get(producerId);
+    const set =
+      videoRefs.current.get(
+        producerId
+      );
 
-    if (!elements) {
+    if (!set) {
       return;
     }
 
-    elements.delete(element);
+    set.delete(element);
 
-    if (elements.size === 0) {
+    if (set.size === 0) {
+
       videoRefs.current.delete(
         producerId
       );
     }
   }
 
-  function createVideoRef(producerId) {
-    return element => {
-      if (element) {
-        setVideoRef(
-          producerId,
-          element
-        );
-      }
-    };
-  }
-
-  function attachStreamToVideos(
+  function attachStream(
     producerId,
     stream
   ) {
+
     if (!stream) {
       return;
     }
@@ -238,52 +327,96 @@ function App() {
       stream
     );
 
-    const elements =
+    const videos =
       videoRefs.current.get(
         producerId
       );
 
-    if (!elements) {
+    if (!videos) {
+
+      console.log(
+        "[VIDEO] ainda não existe elemento para:",
+        producerId
+      );
+
       return;
     }
 
     for (
-      const video of elements
+      const video
+      of videos
     ) {
+
       if (!video) {
         continue;
       }
 
-      if (
-        video.srcObject !==
-        stream
-      ) {
-        video.srcObject =
-          stream;
-      }
+      video.srcObject =
+        stream;
 
-      video.autoplay = true;
-      video.playsInline = true;
+      video.autoplay =
+        true;
+
+      video.playsInline =
+        true;
 
       if (
         producerId ===
         "local"
       ) {
-        video.muted = true;
+
+        video.muted =
+          true;
+
       } else {
-        video.muted = !(
-          audioStates[
-            producerId
-          ] ?? false
-        );
+
+        video.muted =
+          !(
+            audioStates[
+              producerId
+            ] ?? false
+          );
       }
 
       video.volume = 1;
 
-      video.play().catch(
-        () => {}
-      );
+      video.play()
+        .then(
+          () => {
+
+            console.log(
+              "[VIDEO] reproduzindo:",
+              producerId
+            );
+          }
+        )
+        .catch(
+          error => {
+
+            console.warn(
+              "[VIDEO] play falhou:",
+              error
+            );
+          }
+        );
     }
+  }
+
+  function createVideoRef(
+    producerId
+  ) {
+
+    return element => {
+
+      if (element) {
+
+        registerVideo(
+          producerId,
+          element
+        );
+
+      }
+    };
   }
 
   /* =======================================================
@@ -291,10 +424,17 @@ function App() {
   ======================================================= */
 
   useEffect(() => {
+
     let alive = true;
 
-    async function setupDiscord() {
+    async function setup() {
+
       if (!CLIENT_ID) {
+
+        console.warn(
+          "[DISCORD] CLIENT_ID não definido."
+        );
+
         setStatus(
           "Modo navegador"
         );
@@ -305,6 +445,7 @@ function App() {
       }
 
       try {
+
         discordSdk =
           new DiscordSDK(
             CLIENT_ID
@@ -323,9 +464,15 @@ function App() {
         setStatus(
           "Conectado ao Discord"
         );
+
+        console.log(
+          "[DISCORD] SDK pronto"
+        );
+
       } catch (error) {
+
         console.warn(
-          "Discord SDK:",
+          "[DISCORD] SDK:",
           error
         );
 
@@ -337,19 +484,23 @@ function App() {
       connectSignal();
     }
 
-    setupDiscord();
+    setup();
 
     return () => {
+
       alive = false;
 
       cleanupAll();
 
       if (ws.current) {
+
         try {
           ws.current.close();
         } catch {}
+
       }
     };
+
   }, []);
 
   /* =======================================================
@@ -357,22 +508,25 @@ function App() {
   ======================================================= */
 
   function connectSignal() {
+
     console.log(
-      "Conectando:",
+      "[WS] conectando:",
       SIGNALING_URL
     );
 
-    try {
-      const socket =
-        new WebSocket(
-          SIGNALING_URL
-        );
+    const socket =
+      new WebSocket(
+        SIGNALING_URL
+      );
 
-      ws.current = socket;
+    ws.current =
+      socket;
 
-      socket.onopen = () => {
+    socket.onopen =
+      () => {
+
         console.log(
-          "WebSocket conectado."
+          "[WS] conectado"
         );
 
         setError("");
@@ -382,446 +536,492 @@ function App() {
         );
       };
 
-      socket.onmessage =
-        async event => {
-          let msg;
+    socket.onmessage =
+      async event => {
 
-          try {
-            msg = JSON.parse(
+        let msg;
+
+        try {
+
+          msg =
+            JSON.parse(
               event.data
             );
-          } catch {
-            console.error(
-              "Mensagem inválida:",
-              event.data
-            );
 
-            return;
-          }
+        } catch {
 
-          console.log(
-            "Servidor:",
-            msg
+          console.error(
+            "[WS] JSON inválido:",
+            event.data
           );
 
-          /* =================================================
-             CLIENT ID
-          ================================================= */
+          return;
+        }
 
-          if (
-            msg.type ===
-            "client-id"
-          ) {
-            myId.current =
-              String(
-                msg.id || ""
-              );
+        console.log(
+          "[SERVER]",
+          msg
+        );
 
-            console.log(
-              "Meu ID:",
-              myId.current
+        /* =================================================
+           CLIENT ID
+        ================================================= */
+
+        if (
+          msg.type ===
+          "client-id"
+        ) {
+
+          myId.current =
+            String(
+              msg.id || ""
             );
 
-            return;
-          }
+          console.log(
+            "[ID] meu ID:",
+            myId.current
+          );
 
-          /* =================================================
-             SALA CRIADA
-          ================================================= */
+          return;
+        }
 
-          if (
-            msg.type ===
-            "room-created"
-          ) {
-            const code =
-              String(
-                msg.roomId || ""
+        /* =================================================
+           ROOM CREATED
+        ================================================= */
+
+        if (
+          msg.type ===
+          "room-created"
+        ) {
+
+          const code =
+            String(
+              msg.roomId || ""
+            )
+              .trim()
+              .toUpperCase();
+
+          roomId.current =
+            code;
+
+          setRoomCode(
+            code
+          );
+
+          setCurrentRoom(
+            code
+          );
+
+          setInRoom(
+            true
+          );
+
+          setProducers(
+            []
+          );
+
+          setSelectedProducer(
+            "local"
+          );
+
+          requestedOffers.current.clear();
+
+          setError("");
+
+          setStatus(
+            "Sala criada"
+          );
+
+          return;
+        }
+
+        /* =================================================
+           ROOM JOINED
+        ================================================= */
+
+        if (
+          msg.type ===
+          "room-joined"
+        ) {
+
+          const code =
+            String(
+              msg.roomId || ""
+            )
+              .trim()
+              .toUpperCase();
+
+          roomId.current =
+            code;
+
+          setRoomCode(
+            code
+          );
+
+          setCurrentRoom(
+            code
+          );
+
+          setInRoom(
+            true
+          );
+
+          setProducers(
+            []
+          );
+
+          setSelectedProducer(
+            "local"
+          );
+
+          requestedOffers.current.clear();
+
+          setError("");
+
+          setStatus(
+            "Você entrou na sala"
+          );
+
+          return;
+        }
+
+        /* =================================================
+           PRODUCER LIST
+        ================================================= */
+
+        if (
+          msg.type ===
+          "producer-list"
+        ) {
+
+          const list =
+            Array.isArray(
+              msg.producers
+            )
+              ? msg.producers
+              : [];
+
+          const remote =
+            list
+              .map(
+                id =>
+                  String(id)
               )
-                .trim()
-                .toUpperCase();
-
-            roomId.current =
-              code;
-
-            setRoomCode(
-              code
-            );
-
-            setCurrentRoom(
-              code
-            );
-
-            setInRoom(
-              true
-            );
-
-            requestedOffers.current.clear();
-
-            setProducers([]);
-
-            setSelectedProducer(
-              "local"
-            );
-
-            setError("");
-
-            setStatus(
-              "Sala criada"
-            );
-
-            return;
-          }
-
-          /* =================================================
-             SALA ENTRADA
-          ================================================= */
-
-          if (
-            msg.type ===
-            "room-joined"
-          ) {
-            const code =
-              String(
-                msg.roomId || ""
-              )
-                .trim()
-                .toUpperCase();
-
-            roomId.current =
-              code;
-
-            setRoomCode(
-              code
-            );
-
-            setCurrentRoom(
-              code
-            );
-
-            setInRoom(
-              true
-            );
-
-            requestedOffers.current.clear();
-
-            setProducers([]);
-
-            setSelectedProducer(
-              "local"
-            );
-
-            setError("");
-
-            setStatus(
-              "Você entrou na sala"
-            );
-
-            return;
-          }
-
-          /* =================================================
-             LISTA DE PRODUTORES
-          ================================================= */
-
-          if (
-            msg.type ===
-            "producer-list"
-          ) {
-            const list =
-              Array.isArray(
-                msg.producers
-              )
-                ? msg.producers
-                : [];
-
-            const remoteList =
-              list.filter(
-                producerId =>
-                  producerId &&
-                  producerId !==
+              .filter(
+                id =>
+                  id &&
+                  id !==
                     myId.current
-              );
-
-            const limitedList =
-              remoteList.slice(
+              )
+              .slice(
                 0,
                 MAX_PRODUCERS
               );
 
-            console.log(
-              "PRODUTORES REMOTOS:",
-              limitedList
-            );
+          console.log(
+            "[PRODUCERS]",
+            remote
+          );
 
-            setProducers(
-              limitedList
-            );
+          setProducers(
+            remote
+          );
 
-            setSelectedProducer(
-              current => {
-                if (
-                  current ===
-                  "local"
-                ) {
-                  return current;
-                }
+          setSelectedProducer(
+            current => {
 
-                if (
-                  limitedList.includes(
-                    current
-                  )
-                ) {
-                  return current;
-                }
+              if (
+                current !==
+                "local" &&
+                remote.includes(
+                  current
+                )
+              ) {
 
-                return (
-                  limitedList[0] ||
-                  "local"
+                return current;
+              }
+
+              return (
+                current === "local"
+                  ? current
+                  : (
+                      remote[0] ||
+                      "local"
+                    )
+              );
+            }
+          );
+
+          /*
+           * Pequeno atraso para evitar
+           * corrida de renderização.
+           */
+          setTimeout(
+            () => {
+
+              for (
+                const producerId
+                of remote
+              ) {
+
+                requestOffer(
+                  producerId
                 );
               }
+
+            },
+            50
+          );
+
+          return;
+        }
+
+        /* =================================================
+           NEW PRODUCER
+        ================================================= */
+
+        if (
+          msg.type ===
+          "producer"
+        ) {
+
+          const producerId =
+            String(
+              msg.producerId ||
+              ""
             );
 
-            for (
-              const producerId of
-              limitedList
-            ) {
-              requestOffer(
-                producerId
-              );
-            }
-
-            return;
-          }
-
-          /* =================================================
-             NOVO PRODUTOR
-          ================================================= */
-
           if (
-            msg.type ===
-            "producer"
-          ) {
-            const producerId =
-              String(
-                msg.producerId ||
-                ""
-              );
-
-            if (!producerId) {
-              return;
-            }
-
-            if (
-              producerId ===
+            !producerId ||
+            producerId ===
               myId.current
-            ) {
-              return;
-            }
+          ) {
 
-            setProducers(
-              current => {
-                if (
-                  current.includes(
-                    producerId
-                  )
-                ) {
-                  return current;
-                }
+            return;
+          }
 
-                if (
-                  current.length >=
-                  MAX_PRODUCERS
-                ) {
-                  return current;
-                }
+          setProducers(
+            current => {
 
-                return [
-                  ...current,
+              if (
+                current.includes(
                   producerId
-                ];
+                )
+              ) {
+
+                return current;
               }
-            );
 
-            requestOffer(
-              producerId
-            );
+              if (
+                current.length >=
+                MAX_PRODUCERS
+              ) {
 
-            return;
-          }
+                return current;
+              }
 
-          /* =================================================
-             PRODUTOR SAIU
-          ================================================= */
-
-          if (
-            msg.type ===
-            "producer-left"
-          ) {
-            const producerId =
-              String(
-                msg.producerId ||
-                ""
-              );
-
-            if (!producerId) {
-              return;
+              return [
+                ...current,
+                producerId
+              ];
             }
+          );
 
-            removeRemoteProducer(
-              producerId
-            );
+          requestOffer(
+            producerId
+          );
 
-            return;
-          }
+          return;
+        }
 
-          /* =================================================
-             VIEWER COUNT
-          ================================================= */
+        /* =================================================
+           PRODUCER LEFT
+        ================================================= */
 
-          if (
-            msg.type ===
-            "viewer-count"
-          ) {
-            setViewerCount(
-              Number(
-                msg.count || 0
-              )
-            );
+        if (
+          msg.type ===
+          "producer-left"
+        ) {
 
-            return;
-          }
+          removeRemoteProducer(
+            String(
+              msg.producerId ||
+              ""
+            )
+          );
 
-          /* =================================================
-             ERRO
-          ================================================= */
+          return;
+        }
 
-          if (
-            msg.type ===
-            "error"
-          ) {
-            console.error(
-              "Servidor:",
-              msg.message
-            );
+        /* =================================================
+           VIEWER COUNT
+        ================================================= */
 
-            setError(
-              msg.message ||
-              "Erro no servidor."
-            );
+        if (
+          msg.type ===
+          "viewer-count"
+        ) {
 
-            return;
-          }
+          setViewerCount(
+            Number(
+              msg.count || 0
+            )
+          );
 
-          /* =================================================
-             REQUEST OFFER
-          ================================================= */
+          return;
+        }
 
-          if (
-            msg.type ===
-            "request-offer"
-          ) {
-            if (
-              localStream.current
-            ) {
-              await createProducerPeer(
-                msg.viewerId
-              );
-            }
+        /* =================================================
+           ERROR
+        ================================================= */
 
-            return;
-          }
+        if (
+          msg.type ===
+          "error"
+        ) {
 
-          /* =================================================
-             OFFER
-          ================================================= */
-
-          if (
-            msg.type ===
-            "offer"
-          ) {
-            await handleOffer(
-              msg
-            );
-
-            return;
-          }
-
-          /* =================================================
-             ANSWER
-          ================================================= */
-
-          if (
-            msg.type ===
-            "answer"
-          ) {
-            await handleAnswer(
-              msg
-            );
-
-            return;
-          }
-
-          /* =================================================
-             ICE
-          ================================================= */
-
-          if (
-            msg.type ===
-            "ice"
-          ) {
-            await handleIceCandidate(
-              msg
-            );
-
-            return;
-          }
-        };
-
-      socket.onerror =
-        error => {
           console.error(
-            "WebSocket:",
-            error
+            "[SERVER ERROR]",
+            msg.message
           );
 
           setError(
-            "Erro de conexão com o servidor."
-          );
-        };
-
-      socket.onclose =
-        () => {
-          console.warn(
-            "WebSocket fechado."
+            msg.message ||
+            "Erro no servidor."
           );
 
-          setStatus(
-            "Servidor desconectado"
-          );
-        };
-    } catch (error) {
-      console.error(
-        error
-      );
+          return;
+        }
 
-      setError(
-        "WebSocket indisponível."
-      );
-    }
+        /* =================================================
+           REQUEST OFFER
+        ================================================= */
+
+        if (
+          msg.type ===
+          "request-offer"
+        ) {
+
+          console.log(
+            "[SIGNAL] request-offer de:",
+            msg.viewerId
+          );
+
+          if (
+            localStream.current
+          ) {
+
+            await createProducerPeer(
+              String(
+                msg.viewerId ||
+                ""
+              )
+            );
+
+          } else {
+
+            console.warn(
+              "[SIGNAL] request-offer chegou sem stream local."
+            );
+          }
+
+          return;
+        }
+
+        /* =================================================
+           OFFER
+        ================================================= */
+
+        if (
+          msg.type ===
+          "offer"
+        ) {
+
+          await handleOffer(
+            msg
+          );
+
+          return;
+        }
+
+        /* =================================================
+           ANSWER
+        ================================================= */
+
+        if (
+          msg.type ===
+          "answer"
+        ) {
+
+          await handleAnswer(
+            msg
+          );
+
+          return;
+        }
+
+        /* =================================================
+           ICE
+        ================================================= */
+
+        if (
+          msg.type ===
+          "ice"
+        ) {
+
+          await handleIceCandidate(
+            msg
+          );
+
+          return;
+        }
+      };
+
+    socket.onerror =
+      error => {
+
+        console.error(
+          "[WS ERROR]",
+          error
+        );
+
+        setError(
+          "Erro de conexão com o servidor."
+        );
+      };
+
+    socket.onclose =
+      event => {
+
+        console.warn(
+          "[WS CLOSED]",
+          event.code,
+          event.reason
+        );
+
+        setStatus(
+          "Servidor desconectado"
+        );
+      };
   }
 
   /* =======================================================
      SEND
   ======================================================= */
 
-  function send(message) {
+  function send(
+    message
+  ) {
+
     if (
       !ws.current ||
       ws.current.readyState !==
         WebSocket.OPEN
     ) {
+
       console.warn(
-        "WebSocket não conectado."
+        "[SEND] WebSocket não conectado:",
+        message
       );
 
       return false;
@@ -835,12 +1035,13 @@ function App() {
       !payload.roomId &&
       roomId.current
     ) {
+
       payload.roomId =
         roomId.current;
     }
 
     console.log(
-      "Enviando:",
+      "[SEND]",
       payload
     );
 
@@ -854,23 +1055,12 @@ function App() {
   }
 
   /* =======================================================
-     CRIAR SALA
+     CREATE ROOM
   ======================================================= */
 
   function createRoom() {
+
     setError("");
-
-    if (
-      !ws.current ||
-      ws.current.readyState !==
-        WebSocket.OPEN
-    ) {
-      setError(
-        "Servidor ainda não conectado."
-      );
-
-      return;
-    }
 
     send({
       type:
@@ -879,10 +1069,11 @@ function App() {
   }
 
   /* =======================================================
-     ENTRAR
+     JOIN
   ======================================================= */
 
   function joinRoom() {
+
     setError("");
 
     const code =
@@ -891,20 +1082,9 @@ function App() {
         .toUpperCase();
 
     if (!code) {
+
       setError(
         "Digite o código da sala."
-      );
-
-      return;
-    }
-
-    if (
-      !ws.current ||
-      ws.current.readyState !==
-        WebSocket.OPEN
-    ) {
-      setError(
-        "Servidor ainda não conectado."
       );
 
       return;
@@ -920,42 +1100,50 @@ function App() {
   }
 
   /* =======================================================
-     SAIR
+     LEAVE
   ======================================================= */
 
   function leaveRoom() {
-    if (
-      ws.current &&
-      ws.current.readyState ===
-        WebSocket.OPEN &&
-      roomId.current
-    ) {
-      send({
-        type:
-          "leave-room"
-      });
-    }
+
+    send({
+      type:
+        "leave-room"
+    });
 
     cleanupStreams();
 
     roomId.current =
       "";
 
-    setRoomCode("");
+    requestedOffers.current.clear();
 
-    setCurrentRoom("");
+    setRoomCode(
+      ""
+    );
 
-    setInRoom(false);
+    setCurrentRoom(
+      ""
+    );
 
-    setSharing(false);
+    setInRoom(
+      false
+    );
 
-    setProducers([]);
+    setSharing(
+      false
+    );
+
+    setProducers(
+      []
+    );
 
     setSelectedProducer(
       "local"
     );
 
-    setViewerCount(0);
+    setViewerCount(
+      0
+    );
 
     setStatus(
       "Servidor conectado"
@@ -963,13 +1151,15 @@ function App() {
   }
 
   /* =======================================================
-     CAPTURA DE TELA
+     START SHARING
   ======================================================= */
 
   async function startSharing() {
+
     setError("");
 
     if (!inRoom) {
+
       setError(
         "Entre em uma sala primeiro."
       );
@@ -978,10 +1168,6 @@ function App() {
     }
 
     if (sharing) {
-      setError(
-        "Você já está transmitindo."
-      );
-
       return;
     }
 
@@ -989,16 +1175,18 @@ function App() {
       producers.length >=
       MAX_PRODUCERS
     ) {
+
       setError(
-        "A sala já possui 3 transmissões ativas."
+        "A sala já possui 3 transmissões."
       );
 
       return;
     }
 
     try {
+
       console.log(
-        "Solicitando captura da tela..."
+        "[SCREEN] solicitando captura..."
       );
 
       const stream =
@@ -1023,7 +1211,7 @@ function App() {
           });
 
       console.log(
-        "Stream local:",
+        "[SCREEN] stream:",
         stream
       );
 
@@ -1042,7 +1230,7 @@ function App() {
         })
       );
 
-      attachStreamToVideos(
+      attachStream(
         "local",
         stream
       );
@@ -1051,34 +1239,40 @@ function App() {
         stream.getVideoTracks()[0];
 
       if (videoTrack) {
-        videoTrack.addEventListener(
-          "ended",
+
+        videoTrack.onended =
           () => {
-            if (
-              localStream.current
-            ) {
-              stopSharing();
-            }
-          }
-        );
+
+            console.log(
+              "[SCREEN] captura encerrada."
+            );
+
+            stopSharing();
+          };
       }
 
       console.log(
-        "Vídeo tracks:",
+        "[SCREEN] vídeo:",
         stream.getVideoTracks().length
       );
 
       console.log(
-        "Áudio tracks:",
+        "[SCREEN] áudio:",
         stream.getAudioTracks().length
       );
 
-      setSharing(true);
+      setSharing(
+        true
+      );
 
       setSelectedProducer(
         "local"
       );
 
+      /*
+       * PRIMEIRO registra o produtor
+       * no servidor.
+       */
       send({
         type:
           "start-sharing"
@@ -1087,9 +1281,11 @@ function App() {
       setStatus(
         "Você está transmitindo"
       );
+
     } catch (error) {
+
       console.error(
-        "Erro captura:",
+        "[SCREEN ERROR]",
         error
       );
 
@@ -1097,36 +1293,40 @@ function App() {
         error?.name ===
         "NotAllowedError"
       ) {
+
         return;
       }
 
       setError(
-        "Não foi possível iniciar a captura."
+        error?.message ||
+        "Não foi possível capturar a tela."
       );
     }
   }
 
   /* =======================================================
-     PARAR
+     STOP SHARING
   ======================================================= */
 
   function stopSharing() {
+
     console.log(
-      "Parando transmissão..."
+      "[SCREEN] parando..."
     );
 
     if (
       localStream.current
     ) {
-      localStream.current
-        .getTracks()
-        .forEach(
-          track => {
-            try {
-              track.stop();
-            } catch {}
-          }
-        );
+
+      for (
+        const track
+        of localStream.current.getTracks()
+      ) {
+
+        try {
+          track.stop();
+        } catch {}
+      }
     }
 
     localStream.current =
@@ -1136,17 +1336,23 @@ function App() {
       "local"
     );
 
+    /*
+     * Fecha conexões de produtor.
+     */
     for (
       const [
         key,
         pc
-      ] of peerConnections.current
+      ]
+      of peerConnections.current
     ) {
+
       if (
         key.startsWith(
           "local->"
         )
       ) {
+
         try {
           pc.close();
         } catch {}
@@ -1161,27 +1367,23 @@ function App() {
       }
     }
 
-    if (
-      ws.current &&
-      ws.current.readyState ===
-        WebSocket.OPEN &&
-      roomId.current
-    ) {
-      send({
-        type:
-          "stop-sharing"
-      });
-    }
+    send({
+      type:
+        "stop-sharing"
+    });
 
-    const localVideos =
+    const videos =
       videoRefs.current.get(
         "local"
       );
 
-    if (localVideos) {
+    if (videos) {
+
       for (
-        const video of localVideos
+        const video
+        of videos
       ) {
+
         try {
           video.srcObject =
             null;
@@ -1189,10 +1391,13 @@ function App() {
       }
     }
 
-    setSharing(false);
+    setSharing(
+      false
+    );
 
     setAudioStates(
       current => {
+
         const next = {
           ...current
         };
@@ -1204,19 +1409,8 @@ function App() {
     );
 
     setSelectedProducer(
-      current => {
-        if (
-          current ===
-          "local"
-        ) {
-          return (
-            producers[0] ||
-            "local"
-          );
-        }
-
-        return current;
-      }
+      producers[0] ||
+      "local"
     );
 
     setStatus(
@@ -1231,6 +1425,7 @@ function App() {
   function requestOffer(
     producerId
   ) {
+
     if (!producerId) {
       return;
     }
@@ -1247,10 +1442,6 @@ function App() {
         producerId
       )
     ) {
-      console.log(
-        "Offer já solicitada:",
-        producerId
-      );
 
       return;
     }
@@ -1260,7 +1451,7 @@ function App() {
     );
 
     console.log(
-      "Pedindo transmissão:",
+      "[SIGNAL] pedindo offer:",
       producerId
     );
 
@@ -1273,39 +1464,54 @@ function App() {
   }
 
   /* =======================================================
-     PRODUTOR
+     CREATE PRODUCER PEER
   ======================================================= */
 
   async function createProducerPeer(
     viewerId
   ) {
+
     if (
       !viewerId ||
       !localStream.current
     ) {
+
       return;
     }
 
     const key =
       `local->${viewerId}`;
 
+    /*
+     * Se existe uma conexão realmente ativa,
+     * não cria outra.
+     */
     const old =
       peerConnections.current.get(
         key
       );
 
     if (old) {
+
+      const state =
+        old.connectionState;
+
       if (
-        old.signalingState !==
-        "closed"
+        state === "connected" ||
+        state === "connecting"
       ) {
+
         console.log(
-          "Peer já existe:",
+          "[PRODUCER] conexão já ativa:",
           key
         );
 
         return;
       }
+
+      try {
+        old.close();
+      } catch {}
 
       peerConnections.current.delete(
         key
@@ -1313,7 +1519,7 @@ function App() {
     }
 
     console.log(
-      "Criando Peer produtor:",
+      "[PRODUCER] criando peer:",
       key
     );
 
@@ -1330,22 +1536,26 @@ function App() {
       pc
     );
 
-    const stream =
-      localStream.current;
-
+    /*
+     * Adiciona todas as tracks.
+     */
     for (
-      const track of
-      stream.getTracks()
+      const track
+      of localStream.current.getTracks()
     ) {
+
       pc.addTrack(
         track,
-        stream
+        localStream.current
       );
     }
 
     pc.onicecandidate =
-      ({ candidate }) => {
-        if (!candidate) {
+      event => {
+
+        if (
+          !event.candidate
+        ) {
           return;
         }
 
@@ -1359,45 +1569,48 @@ function App() {
           producerId:
             myId.current,
 
-          candidate
+          candidate:
+            event.candidate
         });
       };
 
     pc.onconnectionstatechange =
       () => {
+
         console.log(
-          "PRODUTOR",
-          viewerId,
+          "[PRODUCER STATE]",
+          key,
           pc.connectionState
         );
 
         if (
           pc.connectionState ===
-            "connected"
-        ) {
-          console.log(
-            "PRODUTOR CONECTADO:",
-            viewerId
-          );
-        }
-
-        if (
-          pc.connectionState ===
             "failed" ||
           pc.connectionState ===
-            "closed"
+            "closed" ||
+          pc.connectionState ===
+            "disconnected"
         ) {
-          peerConnections.current.delete(
-            key
-          );
 
-          pendingCandidates.current.delete(
-            key
-          );
+          /*
+           * Só remove se ainda for
+           * a mesma conexão.
+           */
+          if (
+            peerConnections.current.get(
+              key
+            ) === pc
+          ) {
+
+            peerConnections.current.delete(
+              key
+            );
+          }
         }
       };
 
     try {
+
       const offer =
         await pc.createOffer();
 
@@ -1405,15 +1618,8 @@ function App() {
         offer
       );
 
-      if (
-        pc.signalingState ===
-        "closed"
-      ) {
-        return;
-      }
-
       console.log(
-        "Enviando OFFER:",
+        "[PRODUCER] enviando offer:",
         viewerId
       );
 
@@ -1430,9 +1636,11 @@ function App() {
         offer:
           pc.localDescription
       });
+
     } catch (error) {
+
       console.error(
-        "Erro criando offer:",
+        "[PRODUCER] erro offer:",
         error
       );
 
@@ -1443,20 +1651,17 @@ function App() {
       peerConnections.current.delete(
         key
       );
-
-      pendingCandidates.current.delete(
-        key
-      );
     }
   }
 
   /* =======================================================
-     VIEWER — OFFER
+     HANDLE OFFER
   ======================================================= */
 
   async function handleOffer(
     msg
   ) {
+
     const producerId =
       String(
         msg.producerId ||
@@ -1474,8 +1679,9 @@ function App() {
       !producerId ||
       !producerFrom
     ) {
-      console.warn(
-        "Offer inválida:",
+
+      console.error(
+        "[VIEWER] offer inválida:",
         msg
       );
 
@@ -1486,8 +1692,8 @@ function App() {
       `${producerId}->local`;
 
     console.log(
-      "OFFER recebida:",
-      producerId
+      "[VIEWER] recebendo offer:",
+      key
     );
 
     const old =
@@ -1496,6 +1702,7 @@ function App() {
       );
 
     if (old) {
+
       try {
         old.close();
       } catch {}
@@ -1518,52 +1725,71 @@ function App() {
       pc
     );
 
-    /* =====================================================
-       TRACK
-    ===================================================== */
-
     pc.ontrack =
       event => {
+
         console.log(
-          "TRACK RECEBIDA:",
+          "[VIEWER] TRACK:",
           producerId,
-          event.track.kind,
-          event.streams
+          event.track.kind
         );
 
-        /*
-         * Usa diretamente a MediaStream
-         * fornecida pelo navegador.
-         */
-        const stream =
-          event.streams?.[0];
-
-        if (!stream) {
-          console.warn(
-            "Track sem stream:",
-            event.track
+        let stream =
+          streams.current.get(
+            producerId
           );
 
-          return;
+        if (!stream) {
+
+          stream =
+            new MediaStream();
+
+          streams.current.set(
+            producerId,
+            stream
+          );
         }
 
-        streams.current.set(
-          producerId,
-          stream
+        /*
+         * Adiciona track.
+         */
+        if (
+          !stream
+            .getTracks()
+            .some(
+              track =>
+                track.id ===
+                event.track.id
+            )
+        ) {
+
+          stream.addTrack(
+            event.track
+          );
+        }
+
+        console.log(
+          "[VIEWER] stream tracks:",
+          stream.getTracks().map(
+            track =>
+              track.kind
+          )
         );
 
-        attachStreamToVideos(
+        attachStream(
           producerId,
           stream
         );
 
         setProducers(
           current => {
+
             if (
               current.includes(
                 producerId
               )
             ) {
+
               return current;
             }
 
@@ -1571,6 +1797,7 @@ function App() {
               current.length >=
               MAX_PRODUCERS
             ) {
+
               return current;
             }
 
@@ -1583,46 +1810,35 @@ function App() {
 
         /*
          * React pode ainda não ter
-         * renderizado o vídeo.
+         * criado o vídeo.
          */
         setTimeout(
           () => {
-            const latest =
+
+            const stream =
               streams.current.get(
                 producerId
               );
 
-            if (latest) {
-              attachStreamToVideos(
+            if (stream) {
+
+              attachStream(
                 producerId,
-                latest
+                stream
               );
             }
-          },
-          0
-        );
 
-        setTimeout(
-          () => {
-            const latest =
-              streams.current.get(
-                producerId
-              );
-
-            if (latest) {
-              attachStreamToVideos(
-                producerId,
-                latest
-              );
-            }
           },
-          250
+          100
         );
       };
 
     pc.onicecandidate =
-      ({ candidate }) => {
-        if (!candidate) {
+      event => {
+
+        if (
+          !event.candidate
+        ) {
           return;
         }
 
@@ -1635,15 +1851,17 @@ function App() {
 
           producerId,
 
-          candidate
+          candidate:
+            event.candidate
         });
       };
 
     pc.onconnectionstatechange =
       () => {
+
         console.log(
-          "VIEWER",
-          producerId,
+          "[VIEWER STATE]",
+          key,
           pc.connectionState
         );
 
@@ -1651,6 +1869,7 @@ function App() {
           pc.connectionState ===
           "connected"
         ) {
+
           setStatus(
             "Transmissão conectada"
           );
@@ -1661,7 +1880,8 @@ function App() {
             );
 
           if (stream) {
-            attachStreamToVideos(
+
+            attachStream(
               producerId,
               stream
             );
@@ -1674,30 +1894,29 @@ function App() {
           pc.connectionState ===
             "closed"
         ) {
-          peerConnections.current.delete(
-            key
-          );
 
-          pendingCandidates.current.delete(
-            key
-          );
+          if (
+            peerConnections.current.get(
+              key
+            ) === pc
+          ) {
+
+            peerConnections.current.delete(
+              key
+            );
+          }
         }
       };
 
-    pc.oniceconnectionstatechange =
-      () => {
-        console.log(
-          "VIEWER ICE:",
-          producerId,
-          pc.iceConnectionState
-        );
-      };
-
     try {
+
       await pc.setRemoteDescription(
         msg.offer
       );
 
+      /*
+       * ICE que chegou antes da offer.
+       */
       await flushPendingCandidates(
         key
       );
@@ -1710,8 +1929,8 @@ function App() {
       );
 
       console.log(
-        "Enviando ANSWER:",
-        producerId
+        "[VIEWER] enviando answer:",
+        producerFrom
       );
 
       send({
@@ -1726,9 +1945,11 @@ function App() {
         answer:
           pc.localDescription
       });
+
     } catch (error) {
+
       console.error(
-        "Erro processando offer:",
+        "[VIEWER] erro offer:",
         error
       );
 
@@ -1737,10 +1958,6 @@ function App() {
       } catch {}
 
       peerConnections.current.delete(
-        key
-      );
-
-      pendingCandidates.current.delete(
         key
       );
     }
@@ -1753,6 +1970,7 @@ function App() {
   async function handleAnswer(
     msg
   ) {
+
     const viewerId =
       String(
         msg.from ||
@@ -1772,8 +1990,9 @@ function App() {
       );
 
     if (!pc) {
+
       console.warn(
-        "Peer não encontrado:",
+        "[ANSWER] peer não encontrado:",
         key
       );
 
@@ -1781,12 +2000,14 @@ function App() {
     }
 
     try {
+
       if (
         pc.signalingState !==
         "have-local-offer"
       ) {
+
         console.warn(
-          "Estado inesperado:",
+          "[ANSWER] estado inválido:",
           pc.signalingState
         );
 
@@ -1797,17 +2018,19 @@ function App() {
         msg.answer
       );
 
+      console.log(
+        "[ANSWER] aplicada:",
+        key
+      );
+
       await flushPendingCandidates(
         key
       );
 
-      console.log(
-        "ANSWER processada:",
-        viewerId
-      );
     } catch (error) {
+
       console.error(
-        "Erro answer:",
+        "[ANSWER] erro:",
         error
       );
     }
@@ -1820,7 +2043,10 @@ function App() {
   async function handleIceCandidate(
     msg
   ) {
-    if (!msg.candidate) {
+
+    if (
+      !msg.candidate
+    ) {
       return;
     }
 
@@ -1840,17 +2066,23 @@ function App() {
       !producerId ||
       !from
     ) {
+
       return;
     }
 
+    /*
+     * Viewer recebendo ICE do produtor.
+     */
     const viewerKey =
       `${producerId}->local`;
 
+    /*
+     * Produtor recebendo ICE do viewer.
+     */
     const producerKey =
       `local->${from}`;
 
     let key = null;
-
     let pc = null;
 
     if (
@@ -1858,6 +2090,7 @@ function App() {
         viewerKey
       )
     ) {
+
       key =
         viewerKey;
 
@@ -1865,11 +2098,13 @@ function App() {
         peerConnections.current.get(
           viewerKey
         );
+
     } else if (
       peerConnections.current.has(
         producerKey
       )
     ) {
+
       key =
         producerKey;
 
@@ -1879,23 +2114,55 @@ function App() {
         );
     }
 
+    /*
+     * Peer ainda não criado.
+     */
     if (!pc) {
-      key =
-        viewerKey;
 
+      /*
+       * Como não sabemos ainda se somos
+       * viewer ou produtor, guardamos
+       * inicialmente pelo viewerKey.
+       *
+       * Quando o peer for criado,
+       * flushPendingCandidates será chamado.
+       */
       if (
         !pendingCandidates.current.has(
-          key
+          viewerKey
         )
       ) {
+
         pendingCandidates.current.set(
-          key,
+          viewerKey,
           []
         );
       }
 
       pendingCandidates.current
-        .get(key)
+        .get(viewerKey)
+        .push(
+          msg.candidate
+        );
+
+      /*
+       * Também guarda pelo producerKey
+       * para cobrir corrida do produtor.
+       */
+      if (
+        !pendingCandidates.current.has(
+          producerKey
+        )
+      ) {
+
+        pendingCandidates.current.set(
+          producerKey,
+          []
+        );
+      }
+
+      pendingCandidates.current
+        .get(producerKey)
         .push(
           msg.candidate
         );
@@ -1904,22 +2171,15 @@ function App() {
     }
 
     if (
-      pc.signalingState ===
-        "closed" ||
-      pc.connectionState ===
-        "closed"
-    ) {
-      return;
-    }
-
-    if (
       !pc.remoteDescription
     ) {
+
       if (
         !pendingCandidates.current.has(
           key
         )
       ) {
+
         pendingCandidates.current.set(
           key,
           []
@@ -1936,19 +2196,15 @@ function App() {
     }
 
     try {
+
       await pc.addIceCandidate(
         msg.candidate
       );
+
     } catch (error) {
-      if (
-        error?.name ===
-        "InvalidStateError"
-      ) {
-        return;
-      }
 
       console.warn(
-        "Erro ICE:",
+        "[ICE] erro:",
         error
       );
     }
@@ -1961,26 +2217,13 @@ function App() {
   async function flushPendingCandidates(
     key
   ) {
+
     const pc =
       peerConnections.current.get(
         key
       );
 
     if (!pc) {
-      return;
-    }
-
-    if (
-      pc.signalingState ===
-      "closed"
-    ) {
-      return;
-    }
-
-    if (
-      pc.connectionState ===
-      "closed"
-    ) {
       return;
     }
 
@@ -1997,9 +2240,9 @@ function App() {
 
     if (
       !candidates ||
-      candidates.length ===
-        0
+      candidates.length === 0
     ) {
+
       return;
     }
 
@@ -2008,32 +2251,20 @@ function App() {
     );
 
     for (
-      const candidate of
-      candidates
+      const candidate
+      of candidates
     ) {
-      if (
-        pc.signalingState ===
-          "closed" ||
-        pc.connectionState ===
-          "closed"
-      ) {
-        return;
-      }
 
       try {
+
         await pc.addIceCandidate(
           candidate
         );
+
       } catch (error) {
-        if (
-          error?.name ===
-          "InvalidStateError"
-        ) {
-          continue;
-        }
 
         console.warn(
-          "Erro ICE pendente:",
+          "[ICE PENDENTE] erro:",
           error
         );
       }
@@ -2041,14 +2272,19 @@ function App() {
   }
 
   /* =======================================================
-     REMOVER PRODUTOR
+     REMOVE REMOTE PRODUCER
   ======================================================= */
 
   function removeRemoteProducer(
     producerId
   ) {
+
+    if (!producerId) {
+      return;
+    }
+
     console.log(
-      "Removendo transmissão:",
+      "[REMOVE PRODUCER]",
       producerId
     );
 
@@ -2065,6 +2301,7 @@ function App() {
       );
 
     if (pc) {
+
       try {
         pc.close();
       } catch {}
@@ -2084,15 +2321,16 @@ function App() {
       );
 
     if (stream) {
-      stream
-        .getTracks()
-        .forEach(
-          track => {
-            try {
-              track.stop();
-            } catch {}
-          }
-        );
+
+      for (
+        const track
+        of stream.getTracks()
+      ) {
+
+        try {
+          track.stop();
+        } catch {}
+      }
     }
 
     streams.current.delete(
@@ -2105,9 +2343,12 @@ function App() {
       );
 
     if (videos) {
+
       for (
-        const video of videos
+        const video
+        of videos
       ) {
+
         try {
           video.srcObject =
             null;
@@ -2128,28 +2369,9 @@ function App() {
         )
     );
 
-    setSelectedProducer(
-      current => {
-        if (
-          current !==
-          producerId
-        ) {
-          return current;
-        }
-
-        return (
-          producers.find(
-            id =>
-              id !==
-              producerId
-          ) ||
-          "local"
-        );
-      }
-    );
-
     setAudioStates(
       current => {
+
         const next = {
           ...current
         };
@@ -2161,15 +2383,31 @@ function App() {
         return next;
       }
     );
+
+    setSelectedProducer(
+      current => {
+
+        if (
+          current !==
+          producerId
+        ) {
+
+          return current;
+        }
+
+        return "local";
+      }
+    );
   }
 
   /* =======================================================
-     ÁUDIO
+     AUDIO
   ======================================================= */
 
   function toggleAudio(
     producerId
   ) {
+
     const next =
       !(
         audioStates[
@@ -2195,14 +2433,18 @@ function App() {
     }
 
     for (
-      const video of videos
+      const video
+      of videos
     ) {
+
       video.muted =
         !next;
 
-      video.volume = 1;
+      video.volume =
+        1;
 
       if (next) {
+
         video.play()
           .catch(
             () => {}
@@ -2212,51 +2454,33 @@ function App() {
   }
 
   /* =======================================================
-     SELECIONAR
+     SELECT
   ======================================================= */
 
   function selectProducer(
     producerId
   ) {
+
     setSelectedProducer(
       producerId
     );
 
     setTimeout(
       () => {
-        const videos =
-          videoRefs.current.get(
+
+        const stream =
+          streams.current.get(
             producerId
           );
 
-        if (!videos) {
-          return;
+        if (stream) {
+
+          attachStream(
+            producerId,
+            stream
+          );
         }
 
-        for (
-          const video of videos
-        ) {
-          if (
-            producerId ===
-            "local"
-          ) {
-            video.muted =
-              true;
-          } else {
-            video.muted = !(
-              audioStates[
-                producerId
-              ] ?? false
-            );
-          }
-
-          video.volume = 1;
-
-          video.play()
-            .catch(
-              () => {}
-            );
-        }
       },
       50
     );
@@ -2267,44 +2491,48 @@ function App() {
   ======================================================= */
 
   function cleanupStreams() {
+
     if (
       localStream.current
     ) {
-      localStream.current
-        .getTracks()
-        .forEach(
-          track => {
-            try {
-              track.stop();
-            } catch {}
-          }
-        );
+
+      for (
+        const track
+        of localStream.current.getTracks()
+      ) {
+
+        try {
+          track.stop();
+        } catch {}
+      }
     }
 
     localStream.current =
       null;
 
     for (
-      const stream of
-      streams.current.values()
+      const stream
+      of streams.current.values()
     ) {
-      stream
-        .getTracks()
-        .forEach(
-          track => {
-            try {
-              track.stop();
-            } catch {}
-          }
-        );
+
+      for (
+        const track
+        of stream.getTracks()
+      ) {
+
+        try {
+          track.stop();
+        } catch {}
+      }
     }
 
     streams.current.clear();
 
     for (
-      const pc of
-      peerConnections.current.values()
+      const pc
+      of peerConnections.current.values()
     ) {
+
       try {
         pc.close();
       } catch {}
@@ -2317,12 +2545,15 @@ function App() {
     requestedOffers.current.clear();
 
     for (
-      const videos of
-      videoRefs.current.values()
+      const videos
+      of videoRefs.current.values()
     ) {
+
       for (
-        const video of videos
+        const video
+        of videos
       ) {
+
         try {
           video.srcObject =
             null;
@@ -2334,24 +2565,31 @@ function App() {
   }
 
   function cleanupAll() {
+
     cleanupStreams();
 
     roomId.current =
       "";
 
-    setSharing(false);
+    setSharing(
+      false
+    );
 
-    setProducers([]);
+    setProducers(
+      []
+    );
 
     setSelectedProducer(
       "local"
     );
 
-    setViewerCount(0);
+    setViewerCount(
+      0
+    );
   }
 
   /* =======================================================
-     DERIVADOS
+     DERIVED
   ======================================================= */
 
   const displayProducers = [
@@ -2386,6 +2624,7 @@ function App() {
     <main className="app">
 
       {!inRoom ? (
+
         <section className="room-menu">
 
           <div className="brand">
@@ -2436,10 +2675,12 @@ function App() {
               }
               onKeyDown={
                 event => {
+
                   if (
                     event.key ===
                     "Enter"
                   ) {
+
                     joinRoom();
                   }
                 }
@@ -2483,7 +2724,9 @@ function App() {
           </div>
 
         </section>
+
       ) : (
+
         <section className="room-layout">
 
           <header className="room-bar">
@@ -2541,11 +2784,14 @@ function App() {
             <section className="main-stage">
 
               {hasStreams ? (
+
                 <div className="main-video-wrapper">
 
                   {mainProducer ===
                     "local" ? (
+
                     sharing ? (
+
                       <video
                         ref={
                           createVideoRef(
@@ -2556,7 +2802,9 @@ function App() {
                         muted
                         playsInline
                       />
+
                     ) : (
+
                       <div className="empty">
 
                         <div className="empty-icon">
@@ -2568,8 +2816,11 @@ function App() {
                         </h2>
 
                       </div>
+
                     )
+
                   ) : (
+
                     <video
                       ref={
                         createVideoRef(
@@ -2587,23 +2838,27 @@ function App() {
                         )
                       }
                     />
+
                   )}
 
                   <div className="main-overlay">
 
                     <div className="stream-title">
+
                       {mainProducer ===
                       "local"
                         ? "Sua transmissão"
                         : "Transmissão ao vivo"}
+
                     </div>
 
                     <button
                       className="audio-button"
-                      onClick={() =>
-                        toggleAudio(
-                          mainProducer
-                        )
+                      onClick={
+                        () =>
+                          toggleAudio(
+                            mainProducer
+                          )
                       }
                     >
                       {audioStates[
@@ -2616,7 +2871,9 @@ function App() {
                   </div>
 
                 </div>
+
               ) : (
+
                 <div className="empty">
 
                   <div className="empty-icon">
@@ -2633,6 +2890,7 @@ function App() {
                   </p>
 
                 </div>
+
               )}
 
             </section>
@@ -2670,6 +2928,7 @@ function App() {
                       producerId;
 
                     return (
+
                       <button
                         key={
                           producerId
@@ -2727,6 +2986,7 @@ function App() {
                             className="thumb-audio"
                             onClick={
                               event => {
+
                                 event.stopPropagation();
 
                                 toggleAudio(
@@ -2753,6 +3013,7 @@ function App() {
 
                 {displayProducers.length ===
                   0 && (
+
                   <div className="no-streams">
 
                     <span>
@@ -2764,6 +3025,7 @@ function App() {
                     </p>
 
                   </div>
+
                 )}
 
               </div>
@@ -2771,6 +3033,7 @@ function App() {
               <div className="controls">
 
                 {!sharing ? (
+
                   <button
                     className="share-button"
                     onClick={
@@ -2779,7 +3042,9 @@ function App() {
                   >
                     🖥️ Compartilhar tela
                   </button>
+
                 ) : (
+
                   <button
                     className="stop-button"
                     onClick={
@@ -2788,6 +3053,7 @@ function App() {
                   >
                     ■ Parar transmissão
                   </button>
+
                 )}
 
                 <div className="limit-info">
@@ -2816,6 +3082,7 @@ function App() {
           </div>
 
         </section>
+
       )}
 
     </main>
@@ -2832,6 +3099,7 @@ const root =
   );
 
 if (!root) {
+
   throw new Error(
     "Elemento #root não encontrado."
   );
@@ -2840,3 +3108,4 @@ if (!root) {
 createRoot(root).render(
   <App />
 );
+
