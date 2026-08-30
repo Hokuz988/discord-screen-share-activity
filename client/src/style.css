@@ -25,11 +25,19 @@ button {
   cursor: pointer;
 }
 
+/* =========================================================
+   APP
+========================================================= */
+
 .app {
   width: 100%;
   min-height: 100%;
   padding: 24px;
 }
+
+/* =========================================================
+   TOPBAR
+========================================================= */
 
 .topbar {
   display: flex;
@@ -77,21 +85,201 @@ h1 {
   box-shadow: 0 0 10px rgba(35, 212, 122, 0.6);
 }
 
+/* =========================================================
+   SALA — MENU
+========================================================= */
+
+.room-menu {
+  width: min(460px, 100%);
+  margin: 80px auto 0;
+  padding: 32px;
+
+  border: 1px solid #292b30;
+  border-radius: 18px;
+
+  background: #18191c;
+
+  box-shadow:
+    0 20px 60px rgba(0, 0, 0, 0.25);
+}
+
+.room-menu h2 {
+  margin-bottom: 8px;
+  font-size: 26px;
+}
+
+.room-menu > .muted {
+  margin-bottom: 24px;
+}
+
+/* =========================================================
+   JOIN BOX
+========================================================= */
+
+.join-box {
+  display: grid;
+  grid-template-columns: 1fr 100px;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.join-box input {
+  width: 100%;
+
+  padding: 13px 14px;
+
+  border: 1px solid #35373c;
+  border-radius: 10px;
+  outline: none;
+
+  background: #111214;
+  color: white;
+
+  text-align: center;
+  text-transform: uppercase;
+
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
+}
+
+.join-box input::placeholder {
+  color: #777b83;
+  text-transform: none;
+}
+
+.join-box input:focus {
+  border-color: #5865f2;
+
+  box-shadow:
+    0 0 0 3px rgba(88, 101, 242, 0.12);
+}
+
+.join-box button {
+  border: 0;
+  border-radius: 10px;
+
+  background: #2b2d31;
+  color: white;
+
+  font-weight: 700;
+
+  transition:
+    background 0.2s,
+    transform 0.15s;
+}
+
+.join-box button:hover {
+  background: #34373c;
+}
+
+.join-box button:active {
+  transform: scale(0.97);
+}
+
+/* =========================================================
+   ROOM BAR
+========================================================= */
+
+.room-bar {
+  max-width: 1400px;
+  margin: 0 auto 20px;
+
+  padding: 14px 18px;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+
+  border: 1px solid #292b30;
+  border-radius: 14px;
+
+  background: #18191c;
+}
+
+.room-bar > div {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.room-bar span {
+  color: #777b83;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+}
+
+.room-bar strong {
+  padding: 7px 12px;
+
+  border-radius: 8px;
+
+  background: #111214;
+
+  color: #ffffff;
+
+  font-size: 15px;
+  letter-spacing: 3px;
+}
+
+.room-bar button {
+  border: 0;
+  border-radius: 8px;
+
+  padding: 9px 14px;
+
+  background: #2b2d31;
+  color: white;
+
+  font-size: 13px;
+  font-weight: 700;
+
+  transition:
+    background 0.2s,
+    transform 0.15s;
+}
+
+.room-bar button:hover {
+  background: #da373c;
+}
+
+.room-bar button:active {
+  transform: scale(0.97);
+}
+
+/* =========================================================
+   STAGE
+========================================================= */
+
 .stage {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 300px;
+
   gap: 20px;
+
   max-width: 1400px;
   margin: 0 auto;
 }
 
+/* =========================================================
+   VIDEO
+========================================================= */
+
 .video-card {
   position: relative;
+
   min-height: 500px;
+
   overflow: hidden;
+
   border-radius: 16px;
+
   background: #08090a;
+
   border: 1px solid #292b30;
+
   display: flex;
   align-items: center;
   justify-content: center;
@@ -100,32 +288,47 @@ h1 {
 .video-card video {
   width: 100%;
   height: 100%;
+
   min-height: 500px;
+
   display: block;
+
   object-fit: contain;
+
   background: #000;
 }
 
 .live-badge {
   position: absolute;
+
   top: 16px;
   left: 16px;
+
   padding: 7px 10px;
+
   border-radius: 8px;
+
   background: rgba(0, 0, 0, 0.7);
+
   font-size: 12px;
   font-weight: 700;
+
+  backdrop-filter: blur(6px);
 }
 
 .empty {
   text-align: center;
+
   max-width: 420px;
+
   padding: 40px;
+
   opacity: 0.65;
 }
 
 .screen-icon {
   font-size: 48px;
+
   margin-bottom: 20px;
 }
 
@@ -135,13 +338,21 @@ h1 {
 
 .empty p {
   margin: 0;
+
   line-height: 1.5;
 }
 
+/* =========================================================
+   PANEL
+========================================================= */
+
 .panel {
   border: 1px solid #292b30;
+
   background: #18191c;
+
   border-radius: 16px;
+
   padding: 24px;
 }
 
@@ -151,18 +362,33 @@ h1 {
 
 .muted {
   color: #a8abb2;
+
   line-height: 1.5;
 }
+
+/* =========================================================
+   BUTTONS
+========================================================= */
 
 .primary,
 .secondary,
 .danger {
   width: 100%;
+
   border: 0;
+
   border-radius: 10px;
+
   padding: 13px 16px;
+
   font-weight: 700;
+
   margin-top: 12px;
+
+  transition:
+    filter 0.2s,
+    background 0.2s,
+    transform 0.15s;
 }
 
 .primary {
@@ -172,6 +398,12 @@ h1 {
 
 .primary:hover {
   filter: brightness(1.08);
+}
+
+.primary:active,
+.secondary:active,
+.danger:active {
+  transform: scale(0.98);
 }
 
 .secondary {
@@ -188,121 +420,126 @@ h1 {
   color: white;
 }
 
+.danger:hover {
+  filter: brightness(1.08);
+}
+
+/* =========================================================
+   STATS
+========================================================= */
+
 .stats {
   display: grid;
+
   grid-template-columns: 1fr 1fr;
+
   gap: 10px;
+
   margin-top: 20px;
 }
 
 .stats > div {
   padding: 14px;
+
   background: #111214;
+
   border-radius: 10px;
 }
 
 .stats strong {
   display: block;
+
   font-size: 20px;
+
   margin-bottom: 4px;
 }
 
 .stats span {
   color: #949ba4;
+
   font-size: 12px;
 }
 
+/* =========================================================
+   ERROR
+========================================================= */
+
 .error {
   margin-top: 15px;
+
   padding: 12px;
+
   border-radius: 8px;
+
   background: rgba(218, 55, 60, 0.15);
+
   border: 1px solid rgba(218, 55, 60, 0.4);
+
   color: #ff8a8f;
+
   font-size: 13px;
 }
 
+/* =========================================================
+   SMALL
+========================================================= */
+
 small {
   display: block;
+
   margin-top: 20px;
+
   color: #777b83;
+
   line-height: 1.5;
 }
 
-.room-screen {
-  min-height: calc(100vh - 120px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.room-box {
-  width: min(420px, 100%);
-  padding: 32px;
-  border: 1px solid #292b30;
-  border-radius: 18px;
-  background: #18191c;
-  text-align: center;
-}
-
-.room-box h2 {
-  margin-top: 8px;
-  margin-bottom: 8px;
-  font-size: 26px;
-}
-
-.room-box p {
-  color: #a8abb2;
-  line-height: 1.5;
-}
-
-.room-box input {
-  width: 100%;
-  margin-top: 12px;
-  padding: 13px 14px;
-  border: 1px solid #35373c;
-  border-radius: 10px;
-  outline: none;
-  background: #111214;
-  color: white;
-  text-align: center;
-  text-transform: uppercase;
-}
-
-.room-box input:focus {
-  border-color: #5865f2;
-}
-
-.separator {
-  margin: 20px 0 4px;
-  color: #666a72;
-  font-size: 11px;
-  font-weight: 700;
-}
+/* =========================================================
+   ROOM CODE
+========================================================= */
 
 .room-code {
   margin: 16px 0;
+
   padding: 14px;
+
   border-radius: 10px;
+
   background: #111214;
+
   text-align: center;
 }
 
 .room-code span {
   display: block;
+
   margin-bottom: 4px;
+
   color: #777b83;
+
   font-size: 10px;
+
   font-weight: 700;
+
   letter-spacing: 1.5px;
 }
 
 .room-code strong {
   font-size: 26px;
+
   letter-spacing: 4px;
 }
 
+/* =========================================================
+   MOBILE
+========================================================= */
+
 @media (max-width: 800px) {
+
+  .app {
+    padding: 16px;
+  }
+
   .stage {
     grid-template-columns: 1fr;
   }
@@ -319,4 +556,42 @@ small {
     align-items: flex-start;
     flex-direction: column;
   }
+
+  .room-menu {
+    margin-top: 40px;
+    padding: 24px;
+  }
+
+  .room-bar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .room-bar > div {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .room-bar button {
+    width: 100%;
+  }
 }
+
+@media (max-width: 480px) {
+
+  .join-box {
+    grid-template-columns: 1fr;
+  }
+
+  .join-box button {
+    min-height: 44px;
+  }
+
+  .room-bar > div {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+}
+
