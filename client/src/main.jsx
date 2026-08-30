@@ -1,3 +1,4 @@
+
 import React, {
   useEffect,
   useRef,
@@ -28,6 +29,8 @@ const SIGNALING_URL =
 const TURN_SERVER_URL =
   "https://screen-share-activity.onrender.com";
 
+const MAX_STREAMS = 3;
+
 let discordSdk = null;
 
 /* =========================================================
@@ -36,18 +39,13 @@ let discordSdk = null;
 
 async function getIceServers() {
   try {
-    console.log(
-      "Buscando credenciais TURN..."
+    const response = await fetch(
+      `${TURN_SERVER_URL}/turn-credentials`,
+      {
+        method: "GET",
+        cache: "no-store"
+      }
     );
-
-    const response =
-      await fetch(
-        `${TURN_SERVER_URL}/turn-credentials`,
-        {
-          method: "GET",
-          cache: "no-store"
-        }
-      );
 
     if (!response.ok) {
       throw new Error(
@@ -60,18 +58,12 @@ async function getIceServers() {
 
     if (
       !data ||
-      !Array.isArray(
-        data.iceServers
-      )
+      !Array.isArray(data.iceServers)
     ) {
       throw new Error(
         "TURN inválido."
       );
     }
-
-    console.log(
-      "TURN configurado."
-    );
 
     return data.iceServers;
 
@@ -79,10 +71,6 @@ async function getIceServers() {
     console.error(
       "Erro TURN:",
       error
-    );
-
-    console.warn(
-      "Usando STUN como fallback."
     );
 
     return [
@@ -150,13 +138,14 @@ function App() {
   ] = useState(false);
 
   /*
-   * Lista dos produtores remotos.
+   * Lista de transmissões remotas.
    *
-   * Cada item:
+   * Cada objeto:
    *
    * {
-   *   id: "producer-id",
-   *   stream: MediaStream
+   *   id,
+   *   stream,
+   *   muted
    * }
    */
 
@@ -167,12 +156,17 @@ function App() {
 
   /*
    * Qual transmissão está grande.
+   *
+   * Pode ser:
+   * - "local"
+   * - producerId
+   * - null
    */
 
   const [
-    selectedStreamId,
-    setSelectedStreamId
-  ] = useState(null);
+    selectedStream,
+    setSelectedStream
+  ] = useState("local");
 
   /* =======================================================
      REFS
@@ -187,50 +181,18 @@ function App() {
   const localStream =
     useRef(null);
 
-  /*
-   * PeerConnections:
-   *
-   * produtor/viewer ID
-   *        ↓
-   * RTCPeerConnection
-   */
-
   const peerConnections =
     useRef(new Map());
-
-  /*
-   * ICE que chegou antes
-   * da RemoteDescription.
-   */
 
   const pendingCandidates =
     useRef(new Map());
 
-  /*
-   * Streams remotos.
-   */
-
-  const remoteStreamsRef =
-    useRef(new Map());
-
-  /*
-   * Evita problemas com
-   * estado antigo dentro
-   * dos eventos WebSocket.
-   */
-
-  const sharingRef =
-    useRef(false);
-
-  const inRoomRef =
-    useRef(false);
-
   const roomId =
     useRef("");
 
-  /* =========================================================
+  /* =======================================================
      DISCORD
-  ========================================================= */
+  ======================================================= */
 
   useEffect(() => {
 
@@ -239,10 +201,6 @@ function App() {
     async function setupDiscord() {
 
       if (!CLIENT_ID) {
-
-        console.log(
-          "Discord Client ID não configurado."
-        );
 
         setStatus(
           "Modo navegador"
@@ -266,16 +224,10 @@ function App() {
           return;
         }
 
-        setDiscordReady(
-          true
-        );
+        setDiscordReady(true);
 
         setStatus(
           "Conectado ao Discord"
-        );
-
-        console.log(
-          "Discord SDK conectado."
         );
 
       } catch (error) {
@@ -299,20 +251,50 @@ function App() {
 
       alive = false;
 
-      stopSharing();
-
-      closeAllPeers();
+      cleanup();
 
       if (ws.current) {
         ws.current.close();
       }
+
     };
 
   }, []);
 
-  /* =========================================================
+  /* =======================================================
+     CLEANUP
+  ======================================================= */
+
+  function cleanup() {
+
+    if (localStream.current) {
+
+      localStream.current
+        .getTracks()
+        .forEach(
+          track =>
+            track.stop()
+        );
+
+    }
+
+    localStream.current =
+      null;
+
+    if (localVideo.current) {
+
+      localVideo.current.srcObject =
+        null;
+
+    }
+
+    closeAllPeers();
+
+  }
+
+  /* =======================================================
      WEBSOCKET
-  ========================================================= */
+  ======================================================= */
 
   function connectSignal() {
 
@@ -340,6 +322,7 @@ function App() {
         setStatus(
           "Servidor conectado"
         );
+
       };
 
       socket.onmessage =
@@ -354,12 +337,7 @@ function App() {
                 event.data
               );
 
-          } catch (error) {
-
-            console.error(
-              "Mensagem inválida:",
-              event.data
-            );
+          } catch {
 
             return;
           }
@@ -400,25 +378,17 @@ function App() {
               true
             );
 
-            inRoomRef.current =
-              true;
-
             setError("");
 
             setStatus(
               "Sala criada"
             );
 
-            console.log(
-              "SALA CRIADA:",
-              code
-            );
-
             return;
           }
 
           /* =================================================
-             ENTROU NA SALA
+             SALA ENTRADA
           ================================================= */
 
           if (
@@ -448,18 +418,10 @@ function App() {
               true
             );
 
-            inRoomRef.current =
-              true;
-
             setError("");
 
             setStatus(
               "Você entrou na sala"
-            );
-
-            console.log(
-              "ENTROU NA SALA:",
-              code
             );
 
             return;
@@ -476,12 +438,6 @@ function App() {
 
             roomId.current =
               "";
-
-            inRoomRef.current =
-              false;
-
-            sharingRef.current =
-              false;
 
             setRoomCode(
               ""
@@ -503,7 +459,13 @@ function App() {
               0
             );
 
-            clearRemoteStreams();
+            setRemoteStreams(
+              []
+            );
+
+            setSelectedStream(
+              "local"
+            );
 
             closeAllPeers();
 
@@ -520,9 +482,7 @@ function App() {
           ) {
 
             setViewerCount(
-              Number(
-                msg.count || 0
-              )
+              msg.count || 0
             );
 
             return;
@@ -538,7 +498,7 @@ function App() {
           ) {
 
             console.error(
-              "Servidor retornou erro:",
+              "Servidor:",
               msg.message
             );
 
@@ -551,7 +511,7 @@ function App() {
           }
 
           /* =================================================
-             PRODUTOR
+             NOVO PRODUTOR
           ================================================= */
 
           if (
@@ -560,75 +520,57 @@ function App() {
           ) {
 
             /*
-             * Se somos o produtor,
-             * não precisamos assistir
-             * nossa própria transmissão
-             * como stream remota.
+             * Não adiciona o mesmo produtor
+             * duas vezes.
              */
 
             if (
-              sharingRef.current
-            ) {
-              return;
-            }
-
-            if (
-              !msg.producerId
-            ) {
-              return;
-            }
-
-            console.log(
-              "NOVO PRODUTOR:",
-              msg.producerId
-            );
-
-            requestOffer(
-              msg.producerId
-            );
-
-            return;
-          }
-
-          /* =================================================
-             PRODUTORES
-             
-             Suporte caso o servidor
-             envie vários produtores
-             de uma vez.
-          ================================================= */
-
-          if (
-            msg.type ===
-            "producers"
-          ) {
-
-            if (
-              sharingRef.current
-            ) {
-              return;
-            }
-
-            const producers =
-              Array.isArray(
-                msg.producers
-              )
-                ? msg.producers
-                : [];
-
-            for (
-              const producerId
-              of producers
+              msg.producerId &&
+              msg.producerId !==
+                "local"
             ) {
 
-              if (
-                producerId
-              ) {
+              setRemoteStreams(
+                previous => {
 
-                requestOffer(
-                  producerId
-                );
-              }
+                  if (
+                    previous.some(
+                      stream =>
+                        stream.id ===
+                        msg.producerId
+                    )
+                  ) {
+                    return previous;
+                  }
+
+                  if (
+                    previous.length >=
+                    MAX_STREAMS
+                  ) {
+                    return previous;
+                  }
+
+                  return [
+                    ...previous,
+                    {
+                      id:
+                        msg.producerId,
+
+                      stream:
+                        null,
+
+                      muted:
+                        false
+                    }
+                  ];
+
+                }
+              );
+
+              requestOffer(
+                msg.producerId
+              );
+
             }
 
             return;
@@ -644,17 +586,27 @@ function App() {
           ) {
 
             const producerId =
-              msg.producerId ||
-              msg.id;
+              msg.producerId;
 
-            console.log(
-              "PRODUTOR SAIU:",
-              producerId
+            setRemoteStreams(
+              previous =>
+                previous.filter(
+                  stream =>
+                    stream.id !==
+                    producerId
+                )
             );
 
-            removeRemoteStream(
+            if (
+              selectedStream ===
               producerId
-            );
+            ) {
+
+              setSelectedStream(
+                "local"
+              );
+
+            }
 
             const pc =
               peerConnections.current.get(
@@ -670,6 +622,7 @@ function App() {
               peerConnections.current.delete(
                 producerId
               );
+
             }
 
             return;
@@ -684,11 +637,6 @@ function App() {
             "request-offer"
           ) {
 
-            console.log(
-              "PEDIDO DE OFFER:",
-              msg.viewerId
-            );
-
             if (
               localStream.current
             ) {
@@ -696,6 +644,7 @@ function App() {
               await createPeer(
                 msg.viewerId
               );
+
             }
 
             return;
@@ -732,12 +681,6 @@ function App() {
               );
 
             if (!pc) {
-
-              console.warn(
-                "Peer não encontrado:",
-                msg.from
-              );
-
               return;
             }
 
@@ -757,6 +700,7 @@ function App() {
                 "Erro answer:",
                 error
               );
+
             }
 
             return;
@@ -777,10 +721,11 @@ function App() {
 
             return;
           }
+
         };
 
       socket.onerror =
-        (error) => {
+        error => {
 
           console.error(
             "WebSocket:",
@@ -790,18 +735,16 @@ function App() {
           setError(
             "Erro de conexão com o servidor."
           );
+
         };
 
       socket.onclose =
         () => {
 
-          console.warn(
-            "WebSocket fechado."
-          );
-
           setStatus(
             "Servidor desconectado"
           );
+
         };
 
     } catch (error) {
@@ -813,28 +756,22 @@ function App() {
       setError(
         "WebSocket indisponível."
       );
+
     }
+
   }
 
-  /* =========================================================
+  /* =======================================================
      SEND
-  ========================================================= */
+  ======================================================= */
 
   function send(message) {
 
     if (
       !ws.current ||
       ws.current.readyState !==
-      WebSocket.OPEN
+        WebSocket.OPEN
     ) {
-
-      console.warn(
-        "WebSocket ainda não está conectado."
-      );
-
-      setError(
-        "Servidor ainda não conectado."
-      );
 
       return;
     }
@@ -843,11 +780,6 @@ function App() {
       ...message
     };
 
-    /*
-     * Só coloca o roomId automaticamente
-     * se a mensagem ainda não possuir um.
-     */
-
     if (
       !payload.roomId &&
       roomId.current
@@ -855,6 +787,7 @@ function App() {
 
       payload.roomId =
         roomId.current;
+
     }
 
     console.log(
@@ -867,11 +800,12 @@ function App() {
         payload
       )
     );
+
   }
 
-  /* =========================================================
+  /* =======================================================
      CRIAR SALA
-  ========================================================= */
+  ======================================================= */
 
   function createRoom() {
 
@@ -880,7 +814,7 @@ function App() {
     if (
       !ws.current ||
       ws.current.readyState !==
-      WebSocket.OPEN
+        WebSocket.OPEN
     ) {
 
       setError(
@@ -890,19 +824,16 @@ function App() {
       return;
     }
 
-    console.log(
-      "CRIANDO SALA..."
-    );
-
     send({
       type:
         "create-room"
     });
+
   }
 
-  /* =========================================================
+  /* =======================================================
      ENTRAR
-  ========================================================= */
+  ======================================================= */
 
   function joinRoom() {
 
@@ -913,28 +844,10 @@ function App() {
         .trim()
         .toUpperCase();
 
-    console.log(
-      "ENTRANDO NA SALA:",
-      code
-    );
-
     if (!code) {
 
       setError(
         "Digite o código da sala."
-      );
-
-      return;
-    }
-
-    if (
-      !ws.current ||
-      ws.current.readyState !==
-      WebSocket.OPEN
-    ) {
-
-      setError(
-        "Servidor ainda não conectado."
       );
 
       return;
@@ -947,18 +860,14 @@ function App() {
       roomId:
         code
     });
+
   }
 
-  /* =========================================================
+  /* =======================================================
      SAIR
-  ========================================================= */
+  ======================================================= */
 
   function leaveRoom() {
-
-    console.log(
-      "SAINDO DA SALA:",
-      roomId.current
-    );
 
     if (
       localStream.current
@@ -970,6 +879,7 @@ function App() {
           track =>
             track.stop()
         );
+
     }
 
     localStream.current =
@@ -979,19 +889,17 @@ function App() {
       localVideo.current
     ) {
 
-      localVideo.current
-        .srcObject =
+      localVideo.current.srcObject =
         null;
+
     }
 
     closeAllPeers();
 
-    clearRemoteStreams();
-
     if (
       ws.current &&
       ws.current.readyState ===
-      WebSocket.OPEN &&
+        WebSocket.OPEN &&
       roomId.current
     ) {
 
@@ -999,16 +907,11 @@ function App() {
         type:
           "leave-room"
       });
+
     }
 
     roomId.current =
       "";
-
-    inRoomRef.current =
-      false;
-
-    sharingRef.current =
-      false;
 
     setInRoom(
       false
@@ -1030,20 +933,29 @@ function App() {
       0
     );
 
+    setRemoteStreams(
+      []
+    );
+
+    setSelectedStream(
+      "local"
+    );
+
     setStatus(
       "Servidor conectado"
     );
+
   }
 
-  /* =========================================================
+  /* =======================================================
      CAPTURA
-========================================================= */
+  ======================================================= */
 
   async function startSharing() {
 
     setError("");
 
-    if (!inRoomRef.current) {
+    if (!inRoom) {
 
       setError(
         "Entre em uma sala primeiro."
@@ -1052,15 +964,33 @@ function App() {
       return;
     }
 
-    try {
+    /*
+     * Impede mais de 3 streams
+     * neste frontend.
+     */
 
-      console.log(
-        "Solicitando captura da tela..."
+    const totalStreams =
+      remoteStreams.length +
+      (sharing ? 1 : 0);
+
+    if (
+      totalStreams >=
+      MAX_STREAMS
+    ) {
+
+      setError(
+        "A sala já possui o máximo de 3 transmissões."
       );
 
+      return;
+    }
+
+    try {
+
       const stream =
-        await navigator.mediaDevices.getDisplayMedia(
-          {
+        await navigator.mediaDevices
+          .getDisplayMedia({
+
             video: {
               frameRate: {
                 ideal: 30,
@@ -1069,26 +999,19 @@ function App() {
             },
 
             /*
-             * IMPORTANTE:
+             * NÃO captura áudio.
              *
-             * false = NÃO captura
-             * áudio do sistema/Discord.
+             * Dessa forma o áudio
+             * do Discord não entra
+             * na transmissão.
              */
 
             audio: false
-          }
-        );
 
-      console.log(
-        "Stream:",
-        stream
-      );
+          });
 
       localStream.current =
         stream;
-
-      sharingRef.current =
-        true;
 
       if (
         localVideo.current
@@ -1102,6 +1025,7 @@ function App() {
           .catch(
             () => {}
           );
+
       }
 
       const videoTrack =
@@ -1112,21 +1036,19 @@ function App() {
         videoTrack.addEventListener(
           "ended",
           () => {
-
             stopSharing();
           }
         );
+
       }
 
       setSharing(
         true
       );
 
-      /*
-       * Ao começar uma transmissão,
-       * fechamos conexões antigas de viewer
-       * somente se necessário.
-       */
+      setSelectedStream(
+        "local"
+      );
 
       send({
         type:
@@ -1135,10 +1057,6 @@ function App() {
 
       setStatus(
         "Você está transmitindo"
-      );
-
-      console.log(
-        "TRANSMISSÃO INICIADA"
       );
 
     } catch (error) {
@@ -1152,25 +1070,22 @@ function App() {
         error?.name ===
         "NotAllowedError"
       ) {
-
         return;
       }
 
       setError(
         "Não foi possível iniciar a captura."
       );
+
     }
+
   }
 
-  /* =========================================================
+  /* =======================================================
      PARAR
-  ========================================================= */
+  ======================================================= */
 
   function stopSharing() {
-
-    console.log(
-      "Parando transmissão..."
-    );
 
     if (
       localStream.current
@@ -1182,35 +1097,27 @@ function App() {
           track =>
             track.stop()
         );
+
     }
 
     localStream.current =
       null;
 
-    sharingRef.current =
-      false;
-
     if (
       localVideo.current
     ) {
 
-      localVideo.current
-        .srcObject =
+      localVideo.current.srcObject =
         null;
-    }
 
-    /*
-     * Como produtor,
-     * fecha as conexões que estavam
-     * enviando nossa tela.
-     */
+    }
 
     closeAllPeers();
 
     if (
       ws.current &&
       ws.current.readyState ===
-      WebSocket.OPEN &&
+        WebSocket.OPEN &&
       roomId.current
     ) {
 
@@ -1218,162 +1125,65 @@ function App() {
         type:
           "stop-sharing"
       });
+
     }
 
     setSharing(
       false
     );
 
-    if (inRoomRef.current) {
+    if (
+      remoteStreams.length > 0
+    ) {
 
-      setStatus(
-        "Servidor conectado"
+      setSelectedStream(
+        remoteStreams[0].id
       );
+
+    } else {
+
+      setSelectedStream(
+        "local"
+      );
+
     }
+
+    setStatus(
+      "Servidor conectado"
+    );
+
   }
 
-  /* =========================================================
+  /* =======================================================
      PEERS
-========================================================= */
+  ======================================================= */
 
   function closeAllPeers() {
 
     for (
       const pc of
-      peerConnections.current.values()
+        peerConnections.current.values()
     ) {
 
       try {
         pc.close();
       } catch {}
+
     }
 
     peerConnections.current.clear();
 
     pendingCandidates.current.clear();
+
   }
 
-  /* =========================================================
-     REMOTE STREAMS
-========================================================= */
-
-  function addRemoteStream(
-    producerId,
-    stream
-  ) {
-
-    if (
-      !producerId ||
-      !stream
-    ) {
-      return;
-    }
-
-    remoteStreamsRef.current.set(
-      producerId,
-      stream
-    );
-
-    setRemoteStreams(
-      Array.from(
-        remoteStreamsRef.current.entries()
-      ).map(
-        ([id, remoteStream]) => ({
-          id,
-          stream:
-            remoteStream
-        })
-      )
-    );
-
-    /*
-     * Se ainda não existe uma
-     * transmissão selecionada,
-     * seleciona esta.
-     */
-
-    setSelectedStreamId(
-      current => {
-
-        if (current) {
-          return current;
-        }
-
-        return producerId;
-      }
-    );
-  }
-
-  function removeRemoteStream(
-    producerId
-  ) {
-
-    if (!producerId) {
-      return;
-    }
-
-    remoteStreamsRef.current.delete(
-      producerId
-    );
-
-    setRemoteStreams(
-      Array.from(
-        remoteStreamsRef.current.entries()
-      ).map(
-        ([id, stream]) => ({
-          id,
-          stream
-        })
-      )
-    );
-
-    setSelectedStreamId(
-      current => {
-
-        if (
-          current ===
-          producerId
-        ) {
-
-          const remaining =
-            Array.from(
-              remoteStreamsRef.current.keys()
-            );
-
-          return (
-            remaining[0] ||
-            null
-          );
-        }
-
-        return current;
-      }
-    );
-  }
-
-  function clearRemoteStreams() {
-
-    remoteStreamsRef.current.clear();
-
-    setRemoteStreams([]);
-
-    setSelectedStreamId(
-      null
-    );
-  }
-
-  /* =========================================================
+  /* =======================================================
      REQUEST OFFER
-========================================================= */
+  ======================================================= */
 
   function requestOffer(
     producerId
   ) {
-
-    console.log(
-      "Pedindo offer ao produtor:",
-      producerId
-    );
 
     send({
       type:
@@ -1381,20 +1191,16 @@ function App() {
 
       producerId
     });
+
   }
 
-  /* =========================================================
+  /* =======================================================
      CREATE PEER — PRODUTOR
-========================================================= */
+  ======================================================= */
 
   async function createPeer(
     viewerId
   ) {
-
-    console.log(
-      "Criando PeerConnection:",
-      viewerId
-    );
 
     const old =
       peerConnections.current.get(
@@ -1406,6 +1212,7 @@ function App() {
       try {
         old.close();
       } catch {}
+
     }
 
     const iceServers =
@@ -1414,7 +1221,6 @@ function App() {
     const pc =
       new RTCPeerConnection({
         iceServers,
-
         iceTransportPolicy:
           "all"
       });
@@ -1424,29 +1230,23 @@ function App() {
       pc
     );
 
-    /* =====================================================
-       TRACKS
-    ===================================================== */
-
     if (
       localStream.current
     ) {
 
       for (
         const track of
-        localStream.current.getTracks()
+          localStream.current.getTracks()
       ) {
 
         pc.addTrack(
           track,
           localStream.current
         );
-      }
-    }
 
-    /* =====================================================
-       ICE
-    ===================================================== */
+      }
+
+    }
 
     pc.onicecandidate =
       ({ candidate }) => {
@@ -1462,16 +1262,9 @@ function App() {
 
             candidate
           });
+
         }
-      };
 
-    pc.onicecandidateerror =
-      event => {
-
-        console.warn(
-          "PRODUTOR ICE ERROR:",
-          event
-        );
       };
 
     pc.onconnectionstatechange =
@@ -1482,11 +1275,8 @@ function App() {
           viewerId,
           pc.connectionState
         );
-      };
 
-    /* =====================================================
-       OFFER
-    ===================================================== */
+      };
 
     const offer =
       await pc.createOffer();
@@ -1506,15 +1296,11 @@ function App() {
         pc.localDescription
     });
 
-    console.log(
-      "OFFER ENVIADA:",
-      viewerId
-    );
   }
 
-  /* =========================================================
+  /* =======================================================
      HANDLE OFFER — VIEWER
-========================================================= */
+  ======================================================= */
 
   async function handleOffer(
     msg
@@ -1522,11 +1308,6 @@ function App() {
 
     const producerId =
       msg.from;
-
-    console.log(
-      "OFFER RECEBIDA DO PRODUTOR:",
-      producerId
-    );
 
     const old =
       peerConnections.current.get(
@@ -1538,6 +1319,7 @@ function App() {
       try {
         old.close();
       } catch {}
+
     }
 
     const iceServers =
@@ -1546,34 +1328,22 @@ function App() {
     const pc =
       new RTCPeerConnection({
         iceServers,
-
         iceTransportPolicy:
           "all"
       });
-
-    /*
-     * IMPORTANTE:
-     *
-     * Cada produtor possui
-     * seu próprio PeerConnection.
-     */
 
     peerConnections.current.set(
       producerId,
       pc
     );
 
-    /* =====================================================
-       TRACK
-    ===================================================== */
+    /*
+     * Quando receber o vídeo,
+     * colocamos ele na lista.
+     */
 
     pc.ontrack =
       ({ streams }) => {
-
-        console.log(
-          "TRACK RECEBIDA:",
-          producerId
-        );
 
         const stream =
           streams?.[0];
@@ -1582,15 +1352,81 @@ function App() {
           return;
         }
 
-        addRemoteStream(
-          producerId,
-          stream
-        );
-      };
+        setRemoteStreams(
+          previous => {
 
-    /* =====================================================
-       ICE
-    ===================================================== */
+            const exists =
+              previous.some(
+                item =>
+                  item.id ===
+                  producerId
+              );
+
+            if (exists) {
+
+              return previous.map(
+                item =>
+                  item.id ===
+                  producerId
+                    ? {
+                        ...item,
+                        stream
+                      }
+                    : item
+              );
+
+            }
+
+            if (
+              previous.length >=
+              MAX_STREAMS
+            ) {
+
+              return previous;
+
+            }
+
+            return [
+              ...previous,
+              {
+                id:
+                  producerId,
+
+                stream,
+
+                muted:
+                  false
+              }
+            ];
+
+          }
+        );
+
+        /*
+         * Se não existe uma
+         * transmissão principal,
+         * essa vira principal.
+         */
+
+        setSelectedStream(
+          current => {
+
+            if (
+              current ===
+                "local" &&
+              !sharing
+            ) {
+
+              return producerId;
+
+            }
+
+            return current;
+
+          }
+        );
+
+      };
 
     pc.onicecandidate =
       ({ candidate }) => {
@@ -1606,21 +1442,10 @@ function App() {
 
             candidate
           });
+
         }
+
       };
-
-    pc.onicecandidateerror =
-      event => {
-
-        console.warn(
-          "VIEWER ICE ERROR:",
-          event
-        );
-      };
-
-    /* =====================================================
-       CONNECTION
-    ===================================================== */
 
     pc.onconnectionstatechange =
       () => {
@@ -1633,28 +1458,23 @@ function App() {
 
         if (
           pc.connectionState ===
-          "failed"
-        ) {
-
-          setError(
-            "Uma conexão WebRTC falhou."
-          );
-        }
-
-        if (
+            "failed" ||
           pc.connectionState ===
-          "closed"
+            "closed"
         ) {
 
-          removeRemoteStream(
-            producerId
+          setRemoteStreams(
+            previous =>
+              previous.filter(
+                item =>
+                  item.id !==
+                  producerId
+              )
           );
-        }
-      };
 
-    /* =====================================================
-       REMOTE DESCRIPTION
-    ===================================================== */
+        }
+
+      };
 
     try {
 
@@ -1674,11 +1494,8 @@ function App() {
       );
 
       return;
-    }
 
-    /* =====================================================
-       ANSWER
-    ===================================================== */
+    }
 
     try {
 
@@ -1700,23 +1517,20 @@ function App() {
           pc.localDescription
       });
 
-      console.log(
-        "ANSWER ENVIADA:",
-        producerId
-      );
-
     } catch (error) {
 
       console.error(
-        "Erro criando answer:",
+        "Erro answer:",
         error
       );
+
     }
+
   }
 
-  /* =========================================================
+  /* =======================================================
      ICE
-========================================================= */
+  ======================================================= */
 
   async function handleIceCandidate(
     msg
@@ -1742,6 +1556,7 @@ function App() {
           msg.from,
           []
         );
+
       }
 
       pendingCandidates.current
@@ -1751,6 +1566,7 @@ function App() {
         );
 
       return;
+
     }
 
     try {
@@ -1765,12 +1581,14 @@ function App() {
         "ICE:",
         error
       );
+
     }
+
   }
 
-  /* =========================================================
+  /* =======================================================
      FLUSH ICE
-========================================================= */
+  ======================================================= */
 
   async function flushPendingCandidates(
     peerId
@@ -1785,7 +1603,9 @@ function App() {
       !pc ||
       !pc.remoteDescription
     ) {
+
       return;
+
     }
 
     const candidates =
@@ -1797,16 +1617,14 @@ function App() {
       !candidates ||
       candidates.length === 0
     ) {
-      return;
-    }
 
-    console.log(
-      `Processando ${candidates.length} ICE candidates para ${peerId}`
-    );
+      return;
+
+    }
 
     for (
       const candidate of
-      candidates
+        candidates
     ) {
 
       try {
@@ -1815,28 +1633,61 @@ function App() {
           candidate
         );
 
-      } catch (error) {
+      } catch {}
 
-        console.warn(
-          "Erro ICE:",
-          error
-        );
-      }
     }
 
     pendingCandidates.current.delete(
       peerId
     );
+
   }
 
-  /* =========================================================
-     VIDEO COMPONENT
-========================================================= */
+  /* =======================================================
+     SELECIONAR TRANSMISSÃO
+  ======================================================= */
+
+  function selectStream(
+    id
+  ) {
+
+    setSelectedStream(
+      id
+    );
+
+  }
+
+  /* =======================================================
+     MUTAR TRANSMISSÃO
+  ======================================================= */
+
+  function toggleMute(
+    id
+  ) {
+
+    setRemoteStreams(
+      previous =>
+        previous.map(
+          item =>
+            item.id === id
+              ? {
+                  ...item,
+                  muted:
+                    !item.muted
+                }
+              : item
+        )
+    );
+
+  }
+
+  /* =======================================================
+     REMOTE VIDEO
+  ======================================================= */
 
   function RemoteVideo({
-    stream,
-    large = false,
-    onClick
+    item,
+    main
   }) {
 
     const videoRef =
@@ -1846,66 +1697,156 @@ function App() {
 
       if (
         videoRef.current &&
-        stream
+        item.stream
       ) {
 
         videoRef.current.srcObject =
-          stream;
+          item.stream;
+
+        videoRef.current.muted =
+          item.muted;
 
         videoRef.current
           .play()
           .catch(
             () => {}
           );
+
       }
 
-    }, [stream]);
+    }, [
+      item.stream
+    ]);
+
+    useEffect(() => {
+
+      if (
+        videoRef.current
+      ) {
+
+        videoRef.current.muted =
+          item.muted;
+
+      }
+
+    }, [
+      item.muted
+    ]);
 
     return (
-      <video
-        ref={videoRef}
-        autoPlay
-        playsInline
-        muted
+
+      <div
         className={
-          large
-            ? "remote-video large"
-            : "remote-video"
+          main
+            ? "stream main-stream"
+            : "stream mini-stream"
         }
-        onClick={onClick}
-      />
+        onClick={() =>
+          selectStream(item.id)
+        }
+      >
+
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          className="stream-video"
+        />
+
+        <div className="stream-label">
+          <span>
+            ● TRANSMISSÃO
+          </span>
+
+          <button
+            className="audio-button"
+            onClick={event => {
+              event.stopPropagation();
+              toggleMute(item.id);
+            }}
+          >
+            {item.muted
+              ? "🔇"
+              : "🔊"}
+          </button>
+        </div>
+
+      </div>
+
     );
+
   }
 
-  /* =========================================================
-     STREAM SELECTION
-========================================================= */
+  /* =======================================================
+     TODAS AS STREAMS
+  ======================================================= */
 
-  function selectStream(
-    producerId
+  const allStreams = [];
+
+  if (sharing) {
+
+    allStreams.push({
+      id:
+        "local",
+
+      stream:
+        localStream.current,
+
+      local:
+        true
+    });
+
+  }
+
+  for (
+    const stream of
+      remoteStreams
   ) {
 
-    console.log(
-      "Selecionando transmissão:",
-      producerId
-    );
+    if (stream.stream) {
 
-    setSelectedStreamId(
-      producerId
-    );
+      allStreams.push({
+        ...stream,
+        local:
+          false
+      });
+
+    }
+
   }
 
-  /* =========================================================
+  /*
+   * A transmissão principal.
+   */
+
+  let mainStream =
+    allStreams.find(
+      stream =>
+        stream.id ===
+        selectedStream
+    );
+
+  if (!mainStream) {
+
+    mainStream =
+      allStreams[0];
+
+  }
+
+  const miniStreams =
+    allStreams.filter(
+      stream =>
+        stream.id !==
+        mainStream?.id
+    );
+
+  /* =======================================================
      UI
-========================================================= */
+  ======================================================= */
 
   return (
 
     <main className="app">
-
-      {/* =====================================================
-          TOPBAR
-      ===================================================== */}
 
       <header className="topbar">
 
@@ -1938,10 +1879,6 @@ function App() {
         </div>
 
       </header>
-
-      {/* =====================================================
-          MENU
-      ===================================================== */}
 
       {!inRoom ? (
 
@@ -1986,7 +1923,9 @@ function App() {
                   ) {
 
                     joinRoom();
+
                   }
+
                 }
               }
               placeholder="Código da sala"
@@ -2019,10 +1958,6 @@ function App() {
 
         <>
 
-          {/* =================================================
-              ROOM BAR
-          ================================================= */}
-
           <section className="room-bar">
 
             <div>
@@ -2039,13 +1974,10 @@ function App() {
 
             <div className="room-actions">
 
-              <span className="stream-count">
-                {remoteStreams.length}
+              <span className="stream-counter">
+                {allStreams.length}/3
                 {" "}
-                transmissão
-                {remoteStreams.length !== 1
-                  ? "ões"
-                  : ""}
+                transmissões
               </span>
 
               <button
@@ -2061,143 +1993,116 @@ function App() {
 
           </section>
 
-          {/* =================================================
-              CONTENT
-          ================================================= */}
-
           <section className="stage">
-
-            {/* =================================================
-                VIDEO AREA
-            ================================================= */}
 
             <div className="video-area">
 
-              {remoteStreams.length > 0 ? (
+              {mainStream ? (
 
-                <div className="stream-layout">
+                <>
 
-                  {/* =================================================
-                      STREAM PRINCIPAL
-                  ================================================= */}
+                  <div className="main-video">
 
-                  <div className="main-stream">
+                    {mainStream.local ? (
 
-                    {(() => {
+                      <video
+                        ref={
+                          localVideo
+                        }
+                        autoPlay
+                        muted
+                        playsInline
+                        className="main-video-element"
+                      />
 
-                      const selected =
-                        remoteStreams.find(
-                          item =>
-                            item.id ===
-                            selectedStreamId
-                        ) ||
-                        remoteStreams[0];
+                    ) : (
 
-                      return (
+                      <RemoteVideo
+                        item={
+                          mainStream
+                        }
+                        main
+                      />
 
-                        <RemoteVideo
-                          stream={
-                            selected.stream
-                          }
-                          large={true}
-                          onClick={() =>
-                            selectStream(
-                              selected.id
-                            )
-                          }
-                        />
+                    )}
 
-                      );
+                    <div className="main-badge">
 
-                    })()}
-
-                    <div className="stream-label">
-
-                      <span className="live-dot">
-                        ●
-                      </span>
-
-                      AO VIVO
+                      {mainStream.local
+                        ? "● VOCÊ"
+                        : "● AO VIVO"}
 
                     </div>
 
                   </div>
 
-                  {/* =================================================
-                      MINI STREAMS
-                  ================================================= */}
+                  {miniStreams.length >
+                    0 && (
 
-                  {remoteStreams.length > 1 && (
+                    <div className="mini-streams">
 
-                    <div className="stream-sidebar">
+                      {miniStreams.map(
+                        stream => (
 
-                      {remoteStreams
-                        .filter(
-                          item =>
-                            item.id !==
-                            selectedStreamId
-                        )
-                        .map(
-                          item => (
+                          stream.local ? (
 
                             <div
-                              className="mini-stream"
                               key={
-                                item.id
+                                stream.id
                               }
+                              className="stream mini-stream"
                               onClick={() =>
                                 selectStream(
-                                  item.id
+                                  stream.id
                                 )
                               }
                             >
 
-                              <RemoteVideo
-                                stream={
-                                  item.stream
+                              <video
+                                ref={
+                                  localVideo
                                 }
+                                autoPlay
+                                muted
+                                playsInline
+                                className="stream-video"
                               />
 
-                              <div className="mini-label">
-                                ● AO VIVO
+                              <div className="stream-label">
+                                ● VOCÊ
                               </div>
 
                             </div>
 
+                          ) : (
+
+                            <RemoteVideo
+                              key={
+                                stream.id
+                              }
+                              item={
+                                stream
+                              }
+                              main={false}
+                            />
+
                           )
-                        )}
+
+                        )
+                      )}
 
                     </div>
 
                   )}
 
-                </div>
-
-              ) : sharing ? (
-
-                <div className="local-only">
-
-                  <video
-                    ref={
-                      localVideo
-                    }
-                    autoPlay
-                    muted
-                    playsInline
-                  />
-
-                  <div className="stream-label">
-                    ● SUA TRANSMISSÃO
-                  </div>
-
-                </div>
+                </>
 
               ) : (
 
                 <div className="empty">
 
                   <div className="screen-icon">
-                    ▣
+                    🖥️
                   </div>
 
                   <h2>
@@ -2216,10 +2121,6 @@ function App() {
 
             </div>
 
-            {/* =================================================
-                PANEL
-            ================================================= */}
-
             <aside className="panel">
 
               <h2>
@@ -2227,9 +2128,9 @@ function App() {
               </h2>
 
               <p className="muted">
-                Compartilhe sua tela
-                com as pessoas desta
-                sala.
+                Até 3 pessoas podem
+                transmitir ao mesmo
+                tempo.
               </p>
 
               {!sharing ? (
@@ -2238,6 +2139,10 @@ function App() {
                   className="primary"
                   onClick={
                     startSharing
+                  }
+                  disabled={
+                    allStreams.length >=
+                    MAX_STREAMS
                   }
                 >
                   🖥️ Compartilhar tela
@@ -2273,7 +2178,7 @@ function App() {
                 <div>
 
                   <strong>
-                    {remoteStreams.length}
+                    {allStreams.length}
                   </strong>
 
                   <span>
@@ -2300,18 +2205,11 @@ function App() {
                 </b>
               </small>
 
-              {remoteStreams.length > 1 && (
-
-                <div className="hint">
-
-                  💡 Clique em uma
-                  transmissão pequena
-                  para colocá-la em
-                  destaque.
-
-                </div>
-
-              )}
+              <small>
+                Clique em uma miniatura
+                para colocá-la na tela
+                principal.
+              </small>
 
             </aside>
 
@@ -2322,6 +2220,7 @@ function App() {
       )}
 
     </main>
+
   );
 }
 
@@ -2339,6 +2238,7 @@ if (!root) {
   throw new Error(
     "Elemento #root não encontrado."
   );
+
 }
 
 createRoot(root).render(

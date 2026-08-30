@@ -6,13 +6,13 @@ html,
 body,
 #root {
   width: 100%;
-  height: 100%;
+  min-height: 100%;
   margin: 0;
 }
 
 body {
   font-family: Arial, sans-serif;
-  background: #0b0c0e;
+  background: #111214;
   color: #ffffff;
 }
 
@@ -25,6 +25,11 @@ button {
   cursor: pointer;
 }
 
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 /* =========================================================
    APP
 ========================================================= */
@@ -32,7 +37,7 @@ button {
 .app {
   width: 100%;
   min-height: 100vh;
-  padding: 18px;
+  padding: 24px;
 }
 
 /* =========================================================
@@ -40,28 +45,20 @@ button {
 ========================================================= */
 
 .topbar {
-  max-width: 1700px;
-
-  margin: 0 auto 14px;
-
   display: flex;
   align-items: center;
   justify-content: space-between;
-
   gap: 20px;
+
+  max-width: 1920px;
+  margin: 0 auto 20px;
 }
 
 .eyebrow {
-  display: block;
-
-  margin-bottom: 3px;
-
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
-
   letter-spacing: 2px;
-
-  color: #949ba4;
+  opacity: 0.55;
 }
 
 h1,
@@ -72,63 +69,56 @@ p {
 
 h1 {
   margin-bottom: 0;
-
-  font-size: 26px;
+  font-size: 28px;
 }
 
 .status {
   display: flex;
   align-items: center;
-
   gap: 8px;
 
   font-size: 13px;
-
-  color: #b5bac1;
+  opacity: 0.75;
 }
 
 .dot {
   width: 9px;
   height: 9px;
-
   flex-shrink: 0;
 
   border-radius: 50%;
-
   background: #666;
 }
 
 .dot.on {
   background: #23d47a;
-
   box-shadow:
-    0 0 10px rgba(35, 212, 122, 0.6);
+    0 0 10px
+    rgba(35, 212, 122, 0.6);
 }
 
 /* =========================================================
-   ROOM MENU
+   SALA MENU
 ========================================================= */
 
 .room-menu {
   width: min(460px, 100%);
 
-  margin: 100px auto 0;
-
+  margin: 80px auto 0;
   padding: 32px;
 
   border: 1px solid #292b30;
-
   border-radius: 18px;
 
   background: #18191c;
 
   box-shadow:
-    0 20px 60px rgba(0, 0, 0, 0.35);
+    0 20px 60px
+    rgba(0, 0, 0, 0.25);
 }
 
 .room-menu h2 {
   margin-bottom: 8px;
-
   font-size: 26px;
 }
 
@@ -158,17 +148,14 @@ h1 {
   padding: 13px 14px;
 
   border: 1px solid #35373c;
-
   border-radius: 10px;
 
   outline: none;
 
   background: #111214;
-
   color: white;
 
   text-align: center;
-
   text-transform: uppercase;
 
   transition:
@@ -178,7 +165,6 @@ h1 {
 
 .join-box input::placeholder {
   color: #777b83;
-
   text-transform: none;
 }
 
@@ -192,11 +178,9 @@ h1 {
 
 .join-box button {
   border: 0;
-
   border-radius: 10px;
 
   background: #2b2d31;
-
   color: white;
 
   font-weight: 700;
@@ -219,96 +203,67 @@ h1 {
 ========================================================= */
 
 .room-bar {
-  max-width: 1700px;
+  max-width: 1920px;
 
-  margin: 0 auto 12px;
-
-  padding: 10px 14px;
+  margin: 0 auto 16px;
+  padding: 12px 16px;
 
   display: flex;
   align-items: center;
   justify-content: space-between;
 
-  gap: 16px;
+  gap: 20px;
 
   border: 1px solid #292b30;
-
   border-radius: 12px;
 
   background: #18191c;
 }
 
-.room-bar > div {
+.room-bar > div:first-child {
   display: flex;
   align-items: center;
-
-  gap: 10px;
+  gap: 12px;
 }
 
 .room-bar span {
   color: #777b83;
 
   font-size: 10px;
-
   font-weight: 700;
 
   letter-spacing: 1.5px;
 }
 
 .room-bar strong {
-  padding: 6px 10px;
+  padding: 7px 12px;
 
-  border-radius: 7px;
+  border-radius: 8px;
 
   background: #111214;
 
-  font-size: 14px;
+  color: #ffffff;
 
+  font-size: 15px;
   letter-spacing: 3px;
 }
 
 .room-actions {
   display: flex;
-
   align-items: center;
-
   gap: 12px;
 }
 
-.stream-count {
+.room-actions .secondary {
+  width: auto;
+  margin: 0;
+}
+
+.stream-counter {
   color: #949ba4 !important;
 
   font-size: 12px !important;
-
   letter-spacing: 0 !important;
-}
-
-.room-bar button {
-  border: 0;
-
-  border-radius: 8px;
-
-  padding: 8px 13px;
-
-  background: #2b2d31;
-
-  color: white;
-
-  font-size: 13px;
-
-  font-weight: 700;
-
-  transition:
-    background 0.2s,
-    transform 0.15s;
-}
-
-.room-bar button:hover {
-  background: #da373c;
-}
-
-.room-bar button:active {
-  transform: scale(0.97);
 }
 
 /* =========================================================
@@ -317,8 +272,7 @@ h1 {
 
 .stage {
   width: 100%;
-
-  max-width: 1700px;
+  max-width: 1920px;
 
   margin: 0 auto;
 
@@ -326,9 +280,9 @@ h1 {
 
   grid-template-columns:
     minmax(0, 1fr)
-    270px;
+    300px;
 
-  gap: 12px;
+  gap: 16px;
 
   align-items: start;
 }
@@ -342,65 +296,45 @@ h1 {
 
   width: 100%;
 
-  height:
-    calc(100vh - 125px);
+  /*
+   * Área 16:9.
+   *
+   * Em telas grandes pode chegar
+   * a aproximadamente 1920x1080.
+   */
+
+  aspect-ratio: 16 / 9;
 
   min-height: 500px;
 
   overflow: hidden;
 
-  border:
-    1px solid #292b30;
+  border: 1px solid #292b30;
+  border-radius: 14px;
 
-  border-radius: 13px;
+  background: #08090a;
 
-  background: #050506;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* =========================================================
-   STREAM LAYOUT
+   MAIN VIDEO
 ========================================================= */
 
-.stream-layout {
+.main-video {
+  position: relative;
+
   width: 100%;
   height: 100%;
 
-  display: grid;
-
-  grid-template-columns:
-    minmax(0, 1fr)
-    250px;
-
-  gap: 8px;
-
-  padding: 8px;
-}
-
-/* =========================================================
-   MAIN STREAM
-========================================================= */
-
-.main-stream {
-  position: relative;
-
-  min-width: 0;
-  min-height: 0;
-
   overflow: hidden;
 
-  border-radius: 9px;
-
   background: #000;
-
-  cursor: pointer;
 }
 
-.main-stream:hover
-.remote-video {
-  filter: brightness(1.05);
-}
-
-.remote-video {
+.main-video-element {
   width: 100%;
   height: 100%;
 
@@ -409,70 +343,92 @@ h1 {
   object-fit: contain;
 
   background: #000;
-
-  transition:
-    filter 0.2s;
 }
 
-.remote-video.large {
+/* =========================================================
+   STREAM
+========================================================= */
+
+.stream {
+  position: relative;
+
+  overflow: hidden;
+
+  background: #000;
+
+  border: 1px solid #292b30;
+
+  cursor: pointer;
+
+  transition:
+    transform 0.15s,
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+
+.stream:hover {
+  border-color: #5865f2;
+
+  box-shadow:
+    0 0 0 1px
+    rgba(88, 101, 242, 0.35);
+}
+
+.main-stream {
   width: 100%;
   height: 100%;
+
+  border: 0;
+
+  cursor: default;
+}
+
+.mini-stream {
+  flex: 1;
+
+  min-width: 0;
+
+  aspect-ratio: 16 / 9;
+
+  border-radius: 10px;
+}
+
+.stream-video {
+  width: 100%;
+  height: 100%;
+
+  display: block;
+
+  object-fit: contain;
+
+  background: #000;
 }
 
 /* =========================================================
    MINI STREAMS
 ========================================================= */
 
-.stream-sidebar {
-  min-width: 0;
+.mini-streams {
+  position: absolute;
 
-  min-height: 0;
+  right: 14px;
+  bottom: 14px;
 
-  overflow-y: auto;
+  width: min(42%, 520px);
 
   display: flex;
 
-  flex-direction: column;
-
   gap: 8px;
+
+  z-index: 10;
 }
 
-.mini-stream {
-  position: relative;
+.mini-streams .mini-stream {
+  flex: 1;
 
-  width: 100%;
-
-  aspect-ratio: 16 / 9;
-
-  flex-shrink: 0;
-
-  overflow: hidden;
-
-  border:
-    2px solid transparent;
-
-  border-radius: 9px;
-
-  background: #000;
-
-  cursor: pointer;
-
-  transition:
-    border-color 0.2s,
-    transform 0.15s;
-}
-
-.mini-stream:hover {
-  border-color: #5865f2;
-
-  transform: scale(1.01);
-}
-
-.mini-stream .remote-video {
-  width: 100%;
-  height: 100%;
-
-  object-fit: contain;
+  box-shadow:
+    0 8px 25px
+    rgba(0, 0, 0, 0.55);
 }
 
 /* =========================================================
@@ -482,75 +438,96 @@ h1 {
 .stream-label {
   position: absolute;
 
-  left: 12px;
-  bottom: 12px;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
 
-  padding: 6px 9px;
+  min-height: 28px;
+
+  padding: 5px 7px;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  gap: 8px;
 
   border-radius: 6px;
 
   background:
     rgba(0, 0, 0, 0.72);
 
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(6px);
 
-  font-size: 11px;
-
+  font-size: 10px;
   font-weight: 700;
-
-  pointer-events: none;
 }
 
-.live-dot {
-  color: #ed4245;
-
-  margin-right: 5px;
-}
-
-.mini-label {
-  position: absolute;
-
-  left: 7px;
-  bottom: 7px;
-
-  padding: 4px 6px;
-
-  border-radius: 5px;
-
-  background:
-    rgba(0, 0, 0, 0.7);
-
-  font-size: 9px;
-
-  font-weight: 700;
-
-  color: white;
-
-  pointer-events: none;
+.stream-label span {
+  color: #ffffff;
 }
 
 /* =========================================================
-   LOCAL ONLY
+   AUDIO BUTTON
 ========================================================= */
 
-.local-only {
-  position: relative;
+.audio-button {
+  width: 27px;
+  height: 27px;
 
-  width: 100%;
-  height: 100%;
+  padding: 0;
 
-  background: #000;
+  border: 0;
+  border-radius: 6px;
+
+  background:
+    rgba(255, 255, 255, 0.12);
+
+  color: white;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  cursor: pointer;
+
+  transition:
+    background 0.15s,
+    transform 0.15s;
 }
 
-.local-only video {
-  width: 100%;
-  height: 100%;
+.audio-button:hover {
+  background:
+    rgba(255, 255, 255, 0.22);
+}
 
-  display: block;
+.audio-button:active {
+  transform: scale(0.92);
+}
 
-  object-fit: contain;
+/* =========================================================
+   MAIN BADGE
+========================================================= */
 
-  background: #000;
+.main-badge {
+  position: absolute;
+
+  top: 14px;
+  left: 14px;
+
+  padding: 7px 10px;
+
+  border-radius: 7px;
+
+  background:
+    rgba(0, 0, 0, 0.72);
+
+  backdrop-filter: blur(6px);
+
+  font-size: 11px;
+  font-weight: 700;
+
+  z-index: 20;
 }
 
 /* =========================================================
@@ -558,22 +535,13 @@ h1 {
 ========================================================= */
 
 .empty {
-  position: absolute;
-
-  inset: 0;
-
-  display: flex;
-
-  flex-direction: column;
-
-  align-items: center;
-  justify-content: center;
-
-  text-align: center;
+  width: 100%;
 
   padding: 40px;
 
-  opacity: 0.6;
+  text-align: center;
+
+  opacity: 0.65;
 }
 
 .screen-icon {
@@ -587,11 +555,9 @@ h1 {
 }
 
 .empty p {
-  max-width: 400px;
+  max-width: 420px;
 
-  margin: 0;
-
-  color: #a8abb2;
+  margin: 0 auto;
 
   line-height: 1.5;
 }
@@ -601,16 +567,13 @@ h1 {
 ========================================================= */
 
 .panel {
-  width: 100%;
-
-  border:
-    1px solid #292b30;
-
-  border-radius: 13px;
-
-  padding: 19px;
+  border: 1px solid #292b30;
 
   background: #18191c;
+
+  border-radius: 14px;
+
+  padding: 20px;
 }
 
 .panel h2 {
@@ -633,7 +596,6 @@ h1 {
   width: 100%;
 
   border: 0;
-
   border-radius: 9px;
 
   padding: 12px 15px;
@@ -650,7 +612,6 @@ h1 {
 
 .primary {
   background: #5865f2;
-
   color: white;
 }
 
@@ -666,7 +627,6 @@ h1 {
 
 .secondary {
   background: #2b2d31;
-
   color: white;
 }
 
@@ -676,7 +636,6 @@ h1 {
 
 .danger {
   background: #da373c;
-
   color: white;
 }
 
@@ -692,28 +651,27 @@ h1 {
   display: grid;
 
   grid-template-columns:
-    1fr
-    1fr;
+    1fr 1fr;
 
   gap: 8px;
 
-  margin-top: 17px;
+  margin-top: 18px;
 }
 
 .stats > div {
-  padding: 12px;
+  padding: 13px;
 
   background: #111214;
 
-  border-radius: 8px;
+  border-radius: 9px;
 }
 
 .stats strong {
   display: block;
 
-  margin-bottom: 4px;
-
   font-size: 19px;
+
+  margin-bottom: 4px;
 }
 
 .stats span {
@@ -742,27 +700,9 @@ h1 {
 
   color: #ff8a8f;
 
-  font-size: 12px;
-}
+  font-size: 13px;
 
-/* =========================================================
-   HINT
-========================================================= */
-
-.hint {
-  margin-top: 18px;
-
-  padding: 11px;
-
-  border-radius: 8px;
-
-  background: #111214;
-
-  color: #949ba4;
-
-  font-size: 11px;
-
-  line-height: 1.5;
+  line-height: 1.4;
 }
 
 /* =========================================================
@@ -772,7 +712,7 @@ h1 {
 small {
   display: block;
 
-  margin-top: 17px;
+  margin-top: 18px;
 
   color: #777b83;
 
@@ -780,74 +720,67 @@ small {
 }
 
 /* =========================================================
-   SCROLLBAR
+   ROOM CODE
 ========================================================= */
 
-.stream-sidebar::-webkit-scrollbar {
-  width: 6px;
-}
+.room-code {
+  margin: 16px 0;
 
-.stream-sidebar::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.stream-sidebar::-webkit-scrollbar-thumb {
-  background: #2b2d31;
+  padding: 14px;
 
   border-radius: 10px;
+
+  background: #111214;
+
+  text-align: center;
 }
 
-.stream-sidebar::-webkit-scrollbar-thumb:hover {
-  background: #34373c;
+.room-code span {
+  display: block;
+
+  margin-bottom: 4px;
+
+  color: #777b83;
+
+  font-size: 10px;
+
+  font-weight: 700;
+
+  letter-spacing: 1.5px;
+}
+
+.room-code strong {
+  font-size: 26px;
+
+  letter-spacing: 4px;
+}
+
+/* =========================================================
+   MOBILE
+========================================================= */
+
+@media (max-width: 1100px) {
+
+  .stage {
+    grid-template-columns:
+      minmax(0, 1fr)
+      260px;
+  }
+
+  .panel {
+    padding: 16px;
+  }
+
 }
 
 /* =========================================================
    TABLET
 ========================================================= */
 
-@media (max-width: 1150px) {
-
-  .stage {
-    grid-template-columns: 1fr;
-  }
-
-  .panel {
-    display: grid;
-
-    grid-template-columns:
-      1fr
-      1fr;
-
-    gap: 12px;
-  }
-
-  .panel h2,
-  .panel > .muted {
-    grid-column: 1 / -1;
-  }
-
-  .panel .stats {
-    margin-top: 12px;
-  }
-
-  .panel small {
-    grid-column: 1 / -1;
-  }
-
-  .panel .error,
-  .panel .hint {
-    grid-column: 1 / -1;
-  }
-}
-
-/* =========================================================
-   TELAS MENORES
-========================================================= */
-
-@media (max-width: 850px) {
+@media (max-width: 800px) {
 
   .app {
-    padding: 12px;
+    padding: 14px;
   }
 
   .topbar {
@@ -855,33 +788,19 @@ small {
 
     flex-direction: column;
 
-    margin-bottom: 12px;
+    margin-bottom: 14px;
   }
 
-  .video-area {
-    height: 65vh;
-
-    min-height: 400px;
-  }
-
-  .stream-layout {
+  .stage {
     grid-template-columns: 1fr;
   }
 
-  .stream-sidebar {
-    height: 110px;
-
-    flex-direction: row;
-
-    overflow-x: auto;
-
-    overflow-y: hidden;
+  .video-area {
+    min-height: 350px;
   }
 
-  .mini-stream {
-    width: 180px;
-
-    aspect-ratio: 16 / 9;
+  .panel {
+    width: 100%;
   }
 
   .room-bar {
@@ -890,51 +809,39 @@ small {
     flex-direction: column;
   }
 
-  .room-actions {
+  .room-bar > div:first-child {
     width: 100%;
 
     justify-content: space-between;
   }
+
+  .room-actions {
+    width: 100%;
+  }
+
+  .room-actions .secondary {
+    flex: 1;
+  }
+
+  .mini-streams {
+    width: 50%;
+
+    right: 10px;
+    bottom: 10px;
+  }
+
 }
 
 /* =========================================================
-   MOBILE
+   CELULAR
 ========================================================= */
 
-@media (max-width: 600px) {
+@media (max-width: 480px) {
 
   .room-menu {
-    margin-top: 40px;
+    margin-top: 35px;
 
     padding: 24px;
-  }
-
-  .video-area {
-    height: 60vh;
-
-    min-height: 330px;
-
-    border-radius: 10px;
-  }
-
-  .stream-layout {
-    padding: 5px;
-
-    gap: 5px;
-  }
-
-  .stream-sidebar {
-    height: 90px;
-
-    gap: 5px;
-  }
-
-  .mini-stream {
-    width: 145px;
-  }
-
-  .panel {
-    display: block;
   }
 
   .join-box {
@@ -945,15 +852,67 @@ small {
     min-height: 44px;
   }
 
-  .room-actions {
-    align-items: stretch;
+  .room-bar > div:first-child {
+    align-items: flex-start;
 
     flex-direction: column;
 
     gap: 8px;
   }
 
-  .stream-count {
+  .room-actions {
+    align-items: stretch;
+
+    flex-direction: column;
+  }
+
+  .stream-counter {
     text-align: center;
   }
+
+  .video-area {
+    min-height: 260px;
+
+    border-radius: 10px;
+  }
+
+  .mini-streams {
+    position: absolute;
+
+    width: 55%;
+
+    right: 7px;
+    bottom: 7px;
+
+    gap: 5px;
+  }
+
+  .stream-label {
+    left: 4px;
+    right: 4px;
+    bottom: 4px;
+
+    min-height: 22px;
+
+    padding: 3px 5px;
+
+    font-size: 8px;
+  }
+
+  .audio-button {
+    width: 22px;
+    height: 22px;
+
+    font-size: 11px;
+  }
+
+  .main-badge {
+    top: 7px;
+    left: 7px;
+
+    padding: 5px 7px;
+
+    font-size: 9px;
+  }
+
 }
