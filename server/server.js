@@ -52,7 +52,6 @@ const MAX_PRODUCERS =
 app.get(
   "/",
   (_, res) => {
-
     res.json({
       ok: true,
 
@@ -68,7 +67,6 @@ app.get(
 app.get(
   "/health",
   (_, res) => {
-
     res.json({
       ok: true,
 
@@ -85,15 +83,13 @@ app.get(
 );
 
 /* =========================================================
-   CLOUDFLARE TURN
+   TURN
 ========================================================= */
 
 app.get(
   "/turn-credentials",
   async (_, res) => {
-
     try {
-
       const keyId =
         process.env.TURN_KEY_ID;
 
@@ -104,7 +100,6 @@ app.get(
         !keyId ||
         !apiToken
       ) {
-
         return res
           .status(500)
           .json({
@@ -142,7 +137,6 @@ app.get(
       if (
         !response.ok
       ) {
-
         console.error(
           "Erro Cloudflare TURN:",
           data
@@ -159,9 +153,7 @@ app.get(
       res.json(
         data
       );
-
     } catch (error) {
-
       console.error(
         "Erro ao gerar TURN:",
         error
@@ -185,23 +177,17 @@ function send(
   ws,
   message
 ) {
-
   if (
     ws &&
-    ws.readyState ===
-      1
+    ws.readyState === 1
   ) {
-
     try {
-
       ws.send(
         JSON.stringify(
           message
         )
       );
-
     } catch (error) {
-
       console.error(
         "Erro enviando WebSocket:",
         error
@@ -215,23 +201,18 @@ function broadcast(
   message,
   except = null
 ) {
-
   if (!room) {
     return;
   }
 
   for (
-    const client
-    of room.clients
+    const client of
+    room.clients
   ) {
-
     if (
-      client !==
-        except &&
-      client.readyState ===
-        1
+      client !== except &&
+      client.readyState === 1
     ) {
-
       send(
         client,
         message
@@ -243,23 +224,18 @@ function broadcast(
 function getProducerList(
   room
 ) {
-
   if (!room) {
     return [];
   }
 
   return Array.from(
-    room.producers.values()
-  ).map(
-    producer =>
-      producer.id
+    room.producers.keys()
   );
 }
 
 function updateProducerList(
   room
 ) {
-
   if (!room) {
     return;
   }
@@ -268,6 +244,11 @@ function updateProducerList(
     getProducerList(
       room
     );
+
+  console.log(
+    `[ROOM] ${room.id} produtores:`,
+    producers
+  );
 
   broadcast(
     room,
@@ -278,17 +259,11 @@ function updateProducerList(
       producers
     }
   );
-
-  console.log(
-    `[ROOM] ${room.id} produtores:`,
-    producers
-  );
 }
 
 function viewerCount(
   room
 ) {
-
   if (!room) {
     return 0;
   }
@@ -303,7 +278,6 @@ function viewerCount(
 function updateViewerCount(
   room
 ) {
-
   if (!room) {
     return;
   }
@@ -326,21 +300,18 @@ function findClient(
   room,
   id
 ) {
-
   if (!room) {
     return null;
   }
 
   for (
-    const client
-    of room.clients
+    const client of
+    room.clients
   ) {
-
     if (
       client.id ===
       id
     ) {
-
       return client;
     }
   }
@@ -349,7 +320,6 @@ function findClient(
 }
 
 function generateRoomCode() {
-
   const characters =
     "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
@@ -361,7 +331,6 @@ function generateRoomCode() {
     i < 6;
     i++
   ) {
-
     code +=
       characters[
         Math.floor(
@@ -375,18 +344,13 @@ function generateRoomCode() {
 }
 
 function createRoomCode() {
-
   let code;
 
   do {
-
     code =
       generateRoomCode();
-
   } while (
-    rooms.has(
-      code
-    )
+    rooms.has(code)
   );
 
   return code;
@@ -400,7 +364,6 @@ function removeProducer(
   ws,
   notify = true
 ) {
-
   const room =
     ws.room;
 
@@ -413,7 +376,6 @@ function removeProducer(
       ws.id
     )
   ) {
-
     return;
   }
 
@@ -429,11 +391,6 @@ function removeProducer(
   );
 
   if (notify) {
-
-    /*
-     * Primeiro avisa que o produtor
-     * deixou de existir.
-     */
     broadcast(
       room,
       {
@@ -446,9 +403,6 @@ function removeProducer(
       ws
     );
 
-    /*
-     * Depois atualiza a lista.
-     */
     updateProducerList(
       room
     );
@@ -466,7 +420,6 @@ function removeProducer(
 function leaveRoom(
   ws
 ) {
-
   const room =
     ws.room;
 
@@ -478,15 +431,11 @@ function leaveRoom(
     `[ROOM] ${ws.id} saindo de ${room.id}`
   );
 
-  /*
-   * Remove produtor.
-   */
   if (
     room.producers.has(
       ws.id
     )
   ) {
-
     room.producers.delete(
       ws.id
     );
@@ -507,9 +456,6 @@ function leaveRoom(
     );
   }
 
-  /*
-   * Remove cliente.
-   */
   room.clients.delete(
     ws
   );
@@ -520,9 +466,6 @@ function leaveRoom(
   ws.isProducer =
     false;
 
-  /*
-   * Atualiza os demais.
-   */
   updateProducerList(
     room
   );
@@ -531,14 +474,10 @@ function leaveRoom(
     room
   );
 
-  /*
-   * Sala vazia.
-   */
   if (
     room.clients.size ===
     0
   ) {
-
     rooms.delete(
       room.id
     );
@@ -556,10 +495,6 @@ function leaveRoom(
 wss.on(
   "connection",
   ws => {
-
-    /*
-     * ID único.
-     */
     ws.id =
       crypto.randomUUID();
 
@@ -573,9 +508,6 @@ wss.on(
       `[CONNECT] ${ws.id}`
     );
 
-    /*
-     * Entrega ID para o cliente.
-     */
     send(
       ws,
       {
@@ -588,24 +520,20 @@ wss.on(
     );
 
     /* =====================================================
-       MENSAGENS
+       MESSAGE
     ===================================================== */
 
     ws.on(
       "message",
       raw => {
-
         let msg;
 
         try {
-
           msg =
             JSON.parse(
               raw.toString()
             );
-
         } catch {
-
           console.warn(
             "[ERROR] JSON inválido"
           );
@@ -625,9 +553,7 @@ wss.on(
           msg.type ===
           "create-room"
         ) {
-
           if (ws.room) {
-
             leaveRoom(
               ws
             );
@@ -637,7 +563,6 @@ wss.on(
             createRoomCode();
 
           const room = {
-
             id:
               roomId,
 
@@ -700,14 +625,13 @@ wss.on(
         }
 
         /* =================================================
-           ENTRAR NA SALA
+           ENTRAR
         ================================================= */
 
         if (
           msg.type ===
           "join-room"
         ) {
-
           const roomId =
             String(
               msg.roomId ||
@@ -717,7 +641,6 @@ wss.on(
               .toUpperCase();
 
           if (!roomId) {
-
             send(
               ws,
               {
@@ -738,7 +661,6 @@ wss.on(
             );
 
           if (!room) {
-
             send(
               ws,
               {
@@ -754,7 +676,6 @@ wss.on(
           }
 
           if (ws.room) {
-
             leaveRoom(
               ws
             );
@@ -778,11 +699,8 @@ wss.on(
           );
 
           /*
-           * MUITO IMPORTANTE:
-           *
-           * O novo cliente recebe
-           * imediatamente todos os
-           * produtores existentes.
+           * Envia produtores existentes
+           * diretamente para o novo cliente.
            */
           send(
             ws,
@@ -811,9 +729,7 @@ wss.on(
           );
 
           /*
-           * Os clientes antigos também
-           * precisam saber que a composição
-           * da sala mudou.
+           * Atualiza os clientes antigos.
            */
           broadcast(
             room,
@@ -858,7 +774,6 @@ wss.on(
           msg.type ===
           "leave-room"
         ) {
-
           leaveRoom(
             ws
           );
@@ -882,12 +797,10 @@ wss.on(
           msg.type ===
           "start-sharing"
         ) {
-
           const room =
             ws.room;
 
           if (!room) {
-
             send(
               ws,
               {
@@ -902,15 +815,11 @@ wss.on(
             return;
           }
 
-          /*
-           * Já é produtor.
-           */
           if (
             room.producers.has(
               ws.id
             )
           ) {
-
             send(
               ws,
               {
@@ -925,14 +834,10 @@ wss.on(
             return;
           }
 
-          /*
-           * Limite.
-           */
           if (
             room.producers.size >=
             MAX_PRODUCERS
           ) {
-
             send(
               ws,
               {
@@ -948,7 +853,7 @@ wss.on(
           }
 
           /*
-           * REGISTRA UMA ÚNICA VEZ.
+           * REGISTRA O PRODUTOR.
            */
           room.producers.set(
             ws.id,
@@ -978,11 +883,7 @@ wss.on(
           );
 
           /*
-           * Atualiza a lista completa.
-           *
-           * Isso é importante porque
-           * clientes antigos precisam
-           * descobrir o novo produtor.
+           * Atualiza todos.
            */
           updateProducerList(
             room
@@ -996,14 +897,13 @@ wss.on(
         }
 
         /* =================================================
-           PARAR TRANSMISSÃO
+           PARAR
         ================================================= */
 
         if (
           msg.type ===
           "stop-sharing"
         ) {
-
           removeProducer(
             ws
           );
@@ -1019,7 +919,6 @@ wss.on(
           msg.type ===
           "request-offer"
         ) {
-
           const room =
             ws.room;
 
@@ -1037,17 +936,12 @@ wss.on(
             return;
           }
 
-          /*
-           * Verifica se produtor
-           * realmente pertence à sala.
-           */
           const producer =
             room.producers.get(
               producerId
             );
 
           if (!producer) {
-
             send(
               ws,
               {
@@ -1062,14 +956,10 @@ wss.on(
             return;
           }
 
-          /*
-           * Nunca pede própria transmissão.
-           */
           if (
             producer.id ===
             ws.id
           ) {
-
             return;
           }
 
@@ -1077,10 +967,6 @@ wss.on(
             `[SIGNAL] ${ws.id} pediu offer de ${producer.id}`
           );
 
-          /*
-           * Manda diretamente para
-           * o produtor.
-           */
           send(
             producer,
             {
@@ -1103,7 +989,6 @@ wss.on(
           msg.type ===
           "offer"
         ) {
-
           const room =
             ws.room;
 
@@ -1128,7 +1013,6 @@ wss.on(
             );
 
           if (!target) {
-
             console.warn(
               "Target da offer não encontrado:",
               targetId
@@ -1137,18 +1021,13 @@ wss.on(
             return;
           }
 
-          /*
-           * Somente produtor pode
-           * mandar offer.
-           */
           if (
             !room.producers.has(
               ws.id
             )
           ) {
-
             console.warn(
-              "Offer rejeitada: cliente não é produtor.",
+              "Offer rejeitada:",
               ws.id
             );
 
@@ -1187,7 +1066,6 @@ wss.on(
           msg.type ===
           "answer"
         ) {
-
           const room =
             ws.room;
 
@@ -1212,7 +1090,6 @@ wss.on(
             );
 
           if (!target) {
-
             console.warn(
               "Target da answer não encontrado:",
               targetId
@@ -1253,7 +1130,6 @@ wss.on(
           msg.type ===
           "ice"
         ) {
-
           const room =
             ws.room;
 
@@ -1278,15 +1154,9 @@ wss.on(
             );
 
           if (!target) {
-
             return;
           }
 
-          /*
-           * Verifica se a conexão
-           * pertence a uma transmissão
-           * válida.
-           */
           const producerId =
             String(
               msg.producerId ||
@@ -1297,18 +1167,14 @@ wss.on(
             return;
           }
 
+          /*
+           * O produtor precisa existir.
+           */
           if (
             !room.producers.has(
               producerId
             )
           ) {
-
-            /*
-             * Pode ser um ICE de uma
-             * conexão que acabou de morrer.
-             *
-             * Ignora sem derrubar WebSocket.
-             */
             return;
           }
 
@@ -1340,7 +1206,6 @@ wss.on(
     ws.on(
       "close",
       () => {
-
         console.log(
           `[DISCONNECT] ${ws.id}`
         );
@@ -1354,7 +1219,6 @@ wss.on(
     ws.on(
       "error",
       error => {
-
         console.error(
           `[WS ERROR] ${ws.id}`,
           error
@@ -1372,7 +1236,6 @@ server.listen(
   PORT,
   "0.0.0.0",
   () => {
-
     console.log(
       `ScreenCast server rodando na porta ${PORT}`
     );
