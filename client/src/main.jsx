@@ -152,11 +152,6 @@ function App() {
   ] = useState("local");
 
   const [
-    audioStates,
-    setAudioStates
-  ] = useState({});
-
-  const [
     streamVersion,
     setStreamVersion
   ] = useState(0);
@@ -302,14 +297,15 @@ function App() {
     element.playsInline =
       true;
 
+    /*
+     * Vídeo local sempre sem áudio.
+     *
+     * Miniaturas também ficam sem áudio.
+     * O vídeo principal remoto é controlado
+     * pelo próprio controle nativo do navegador.
+     */
     element.muted =
-      producerId === "local"
-        ? true
-        : !(
-            audioStates[
-              producerId
-            ] ?? false
-          );
+      producerId === "local";
 
     element.volume = 1;
 
@@ -431,14 +427,18 @@ function App() {
           video.playsInline =
             true;
 
+          /*
+           * Som:
+           *
+           * local = sempre mudo
+           *
+           * remoto = áudio normal
+           *
+           * O usuário controla volume/mute
+           * pelos controles nativos do vídeo.
+           */
           video.muted =
-            producerId === "local"
-              ? true
-              : !(
-                  audioStates[
-                    producerId
-                  ] ?? false
-                );
+            producerId === "local";
 
           video.volume = 1;
 
@@ -704,9 +704,6 @@ function App() {
       const pc =
         await createPeer(key);
 
-      /*
-       * Adiciona as tracks da tela.
-       */
       const tracks =
         localStream.current.getTracks();
 
@@ -727,9 +724,6 @@ function App() {
         }
       }
 
-      /*
-       * ICE producer -> viewer.
-       */
       pc.onicecandidate =
         event => {
           if (!event.candidate) {
@@ -760,9 +754,6 @@ function App() {
           });
         };
 
-      /*
-       * Estado ICE.
-       */
       pc.oniceconnectionstatechange =
         () => {
           console.log(
@@ -780,9 +771,6 @@ function App() {
               viewerId
             );
 
-            /*
-             * Permite nova negociação.
-             */
             closePeer(key);
 
             setTimeout(() => {
@@ -806,9 +794,6 @@ function App() {
           }
         };
 
-      /*
-       * Estado WebRTC.
-       */
       pc.onconnectionstatechange =
         () => {
           console.log(
@@ -820,7 +805,7 @@ function App() {
 
           if (
             pc.connectionState ===
-              "connected"
+            "connected"
           ) {
             console.log(
               "[PRODUCER] conexão estabelecida:",
@@ -849,9 +834,6 @@ function App() {
           }
         };
 
-      /*
-       * Cria offer.
-       */
       const offer =
         await pc.createOffer({
           offerToReceiveAudio: false,
@@ -862,13 +844,6 @@ function App() {
         offer
       );
 
-      /*
-       * Espera o ICE gathering terminar.
-       *
-       * Isso torna a negociação mais robusta
-       * em navegadores/ambientes onde candidates
-       * podem chegar muito cedo.
-       */
       await waitForIceGatheringComplete(
         pc
       );
@@ -1017,10 +992,6 @@ function App() {
       producerId
     );
 
-    /*
-     * Se já existe um peer saudável,
-     * não cria outro.
-     */
     const existing =
       peerConnections.current.get(
         key
@@ -1049,9 +1020,6 @@ function App() {
       const pc =
         await createPeer(key);
 
-      /*
-       * TRACK
-       */
       pc.ontrack =
         event => {
           console.log(
@@ -1142,9 +1110,6 @@ function App() {
           );
         };
 
-      /*
-       * ICE viewer -> producer.
-       */
       pc.onicecandidate =
         event => {
           if (!event.candidate) {
@@ -1174,9 +1139,6 @@ function App() {
           });
         };
 
-      /*
-       * ICE state.
-       */
       pc.oniceconnectionstatechange =
         () => {
           console.log(
@@ -1187,9 +1149,9 @@ function App() {
 
           if (
             pc.iceConnectionState ===
-            "connected" ||
+              "connected" ||
             pc.iceConnectionState ===
-            "completed"
+              "completed"
           ) {
             setStatus(
               "Transmissão conectada"
@@ -1207,9 +1169,6 @@ function App() {
           }
         };
 
-      /*
-       * Connection state.
-       */
       pc.onconnectionstatechange =
         () => {
           console.log(
@@ -1253,9 +1212,6 @@ function App() {
           }
         };
 
-      /*
-       * Remote description.
-       */
       await pc.setRemoteDescription(
         msg.offer
       );
@@ -1265,17 +1221,10 @@ function App() {
         producerId
       );
 
-      /*
-       * Agora podemos adicionar
-       * candidates que chegaram antes.
-       */
       await flushPendingCandidates(
         key
       );
 
-      /*
-       * Answer.
-       */
       const answer =
         await pc.createAnswer();
 
@@ -1430,21 +1379,13 @@ function App() {
 
     let key;
 
-    /*
-     * ICE vindo do viewer para mim.
-     */
     if (
       producerId ===
       myId.current
     ) {
       key =
         `local->${from}`;
-    }
-
-    /*
-     * ICE vindo do producer para mim.
-     */
-    else {
+    } else {
       key =
         `${producerId}->local`;
     }
@@ -1454,9 +1395,6 @@ function App() {
         key
       );
 
-    /*
-     * Peer ainda não existe.
-     */
     if (!pc) {
       console.log(
         "[ICE] peer ainda não existe, enfileirando:",
@@ -1483,10 +1421,6 @@ function App() {
       return;
     }
 
-    /*
-     * Remote description ainda não foi
-     * aplicada.
-     */
     if (
       !pc.remoteDescription
     ) {
@@ -1647,20 +1581,6 @@ function App() {
         )
     );
 
-    setAudioStates(
-      current => {
-        const next = {
-          ...current
-        };
-
-        delete next[
-          producerId
-        ];
-
-        return next;
-      }
-    );
-
     setSelectedProducer(
       current => {
         if (
@@ -1699,11 +1619,6 @@ function App() {
       return;
     }
 
-    /*
-     * Conta apenas produtores remotos.
-     * O local ainda não está na lista até
-     * o servidor confirmar.
-     */
     if (
       producers.length >=
       MAX_PRODUCERS
@@ -1752,13 +1667,6 @@ function App() {
       streams.current.set(
         "local",
         stream
-      );
-
-      setAudioStates(
-        current => ({
-          ...current,
-          local: false
-        })
       );
 
       setSharing(true);
@@ -1875,9 +1783,6 @@ function App() {
       });
     }
 
-    /*
-     * Fecha todos os peers producer->viewer.
-     */
     for (
       const [
         key
@@ -1895,9 +1800,6 @@ function App() {
 
     creatingProducerPeers.current.clear();
 
-    /*
-     * Para captura.
-     */
     if (
       localStream.current
     ) {
@@ -1924,18 +1826,6 @@ function App() {
     );
 
     setSharing(false);
-
-    setAudioStates(
-      current => {
-        const next = {
-          ...current
-        };
-
-        delete next.local;
-
-        return next;
-      }
-    );
 
     setSelectedProducer(
       current => {
@@ -2042,55 +1932,6 @@ function App() {
   }
 
   /* =======================================================
-     AUDIO
-  ======================================================= */
-
-  function toggleAudio(
-    producerId
-  ) {
-    const next =
-      !(
-        audioStates[
-          producerId
-        ] ?? false
-      );
-
-    setAudioStates(
-      current => ({
-        ...current,
-        [producerId]:
-          next
-      })
-    );
-
-    const videos =
-      videoRefs.current.get(
-        producerId
-      );
-
-    if (!videos) {
-      return;
-    }
-
-    for (
-      const video
-      of videos
-    ) {
-      video.muted =
-        !next;
-
-      video.volume = 1;
-
-      if (next) {
-        video.play()
-          .catch(
-            () => {}
-          );
-      }
-    }
-  }
-
-  /* =======================================================
      SELECT PRODUCER
   ======================================================= */
 
@@ -2116,6 +1957,43 @@ function App() {
           producerId,
           stream
         );
+
+        /*
+         * Como esta função normalmente é chamada
+         * por um clique do usuário, tentamos tocar
+         * o vídeo principal com áudio.
+         */
+        const videos =
+          videoRefs.current.get(
+            producerId
+          );
+
+        if (
+          producerId !== "local" &&
+          videos
+        ) {
+          for (
+            const video
+            of videos
+          ) {
+            video.muted = false;
+            video.volume = 1;
+
+            video.play()
+              .then(() => {
+                console.log(
+                  "[VIDEO] áudio habilitado:",
+                  producerId
+                );
+              })
+              .catch(error => {
+                console.warn(
+                  "[VIDEO] navegador bloqueou autoplay com áudio:",
+                  error
+                );
+              });
+          }
+        }
       },
       0
     );
@@ -2126,9 +2004,6 @@ function App() {
   ======================================================= */
 
   function cleanupStreams() {
-    /*
-     * Para local.
-     */
     if (
       localStream.current
     ) {
@@ -2146,9 +2021,6 @@ function App() {
     localStream.current =
       null;
 
-    /*
-     * Fecha peers.
-     */
     for (
       const [
         key
@@ -2158,9 +2030,6 @@ function App() {
       closePeer(key);
     }
 
-    /*
-     * Limpa streams.
-     */
     for (
       const stream
       of streams.current.values()
@@ -2184,9 +2053,6 @@ function App() {
 
     creatingProducerPeers.current.clear();
 
-    /*
-     * Limpa vídeos.
-     */
     for (
       const videos
       of videoRefs.current.values()
@@ -2525,9 +2391,6 @@ function App() {
               }
             );
 
-            /*
-             * Pede offers para cada producer.
-             */
             for (
               const producerId
               of remote
@@ -2980,6 +2843,7 @@ function App() {
                         autoPlay
                         muted
                         playsInline
+                        controls
                       />
 
                     ) : (
@@ -3000,6 +2864,13 @@ function App() {
 
                   ) : (
 
+                    /*
+                     * VÍDEO PRINCIPAL REMOTO
+                     *
+                     * Aqui o áudio é totalmente
+                     * controlado pelos controles
+                     * nativos do <video>.
+                     */
                     <video
                       ref={
                         element => {
@@ -3008,19 +2879,23 @@ function App() {
                               mainProducer,
                               element
                             );
+
+                            /*
+                             * O vídeo principal remoto
+                             * começa com áudio habilitado.
+                             */
+                            element.muted =
+                              false;
+
+                            element.volume =
+                              1;
                           }
                         }
                       }
                       autoPlay
                       playsInline
                       controls
-                      muted={
-                        !(
-                          audioStates[
-                            mainProducer
-                          ] ?? false
-                        )
-                      }
+                      muted={false}
                     />
 
                   )}
@@ -3035,24 +2910,6 @@ function App() {
                         : "Transmissão ao vivo"}
 
                     </div>
-
-                    <button
-                      className="audio-button"
-                      onClick={
-                        () =>
-                          toggleAudio(
-                            mainProducer
-                          )
-                      }
-                    >
-                      {
-                        audioStates[
-                          mainProducer
-                        ]
-                          ? "🔊"
-                          : "🔇"
-                      }
-                    </button>
 
                   </div>
 
@@ -3147,15 +3004,7 @@ function App() {
                               }
                             }
                             autoPlay
-                            muted={
-                              isLocal
-                                ? true
-                                : !(
-                                    audioStates[
-                                      producerId
-                                    ] ?? false
-                                  )
-                            }
+                            muted
                             playsInline
                           />
 
@@ -3171,27 +3020,6 @@ function App() {
                             {isLocal
                               ? "Você"
                               : "Transmissão"}
-                          </span>
-
-                          <span
-                            className="thumb-audio"
-                            onClick={
-                              event => {
-                                event.stopPropagation();
-
-                                toggleAudio(
-                                  producerId
-                                );
-                              }
-                            }
-                          >
-                            {
-                              audioStates[
-                                producerId
-                              ]
-                                ? "🔊"
-                                : "🔇"
-                            }
                           </span>
 
                         </div>
