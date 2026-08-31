@@ -9,58 +9,39 @@ import {
 } from "ws";
 
 /* =========================================================
-   CONFIG
-========================================================= */
-
-const PORT =
-  process.env.PORT || 8787;
-
-const MAX_PRODUCERS = 3;
-
-/* =========================================================
    APP
 ========================================================= */
 
 const app = express();
 
-const server =
-  http.createServer(app);
+const server = http.createServer(app);
 
 app.use(
   cors({
     origin: "*",
-    methods: [
-      "GET",
-      "POST",
-      "OPTIONS"
-    ]
+    methods: ["GET", "POST", "OPTIONS"]
   })
 );
 
-app.use(
-  express.json()
-);
+app.use(express.json());
+
+const wss = new WebSocketServer({
+  server,
+  perMessageDeflate: false
+});
+
+const rooms = new Map();
+
+const PORT =
+  Number(process.env.PORT) || 8787;
+
+const MAX_PRODUCERS = 3;
 
 /* =========================================================
-   WEBSOCKET
+   CONSTANTS
 ========================================================= */
 
-const wss =
-  new WebSocketServer({
-    server,
-    perMessageDeflate: false
-  });
-
-/*
- * roomId -> room
- *
- * room = {
- *   id,
- *   clients: Set<WebSocket>,
- *   producers: Map<clientId, WebSocket>
- * }
- */
-const rooms = new Map();
+const WS_OPEN = 1;
 
 /* =========================================================
    HTTP
@@ -69,26 +50,18 @@ const rooms = new Map();
 app.get("/", (_, res) => {
   res.json({
     ok: true,
-    service:
-      "ScreenCast Signaling Server",
-    maxProducers:
-      MAX_PRODUCERS,
-    websocket: true
+    service: "ScreenCast Signaling Server",
+    maxProducers: MAX_PRODUCERS,
+    rooms: rooms.size
   });
 });
 
 app.get("/health", (_, res) => {
   res.json({
     ok: true,
-    service:
-      "screencast-signaling",
+    service: "screencast-signaling",
     rooms: rooms.size,
-    maxProducers:
-      MAX_PRODUCERS,
-    uptime:
-      Math.floor(
-        process.uptime()
-      )
+    maxProducers: MAX_PRODUCERS
   });
 });
 
@@ -107,33 +80,30 @@ app.get(
         process.env.TURN_API_TOKEN;
 
       if (!keyId || !apiToken) {
-        return res
-          .status(500)
-          .json({
-            error:
-              "TURN não configurado no servidor."
-          });
+        return res.status(500).json({
+          error:
+            "TURN não configurado no servidor"
+        });
       }
 
-      const response =
-        await fetch(
-          `https://rtc.live.cloudflare.com/v1/turn/keys/${keyId}/credentials/generate-ice-servers`,
-          {
-            method: "POST",
+      const response = await fetch(
+        `https://rtc.live.cloudflare.com/v1/turn/keys/${keyId}/credentials/generate-ice-servers`,
+        {
+          method: "POST",
 
-            headers: {
-              Authorization:
-                `Bearer ${apiToken}`,
+          headers: {
+            Authorization:
+              `Bearer ${apiToken}`,
 
-              "Content-Type":
-                "application/json"
-            },
+            "Content-Type":
+              "application/json"
+          },
 
-            body: JSON.stringify({
-              ttl: 3600
-            })
-          }
-        );
+          body: JSON.stringify({
+            ttl: 3600
+          })
+        }
+      );
 
       const data =
         await response.json();
@@ -144,41 +114,38 @@ app.get(
           data
         );
 
-        return res
-          .status(500)
-          .json({
-            error:
-              "Não foi possível gerar credenciais TURN."
-          });
+        return res.status(500).json({
+          error:
+            "Não foi possível gerar credenciais TURN"
+        });
       }
 
       return res.json(data);
 
     } catch (error) {
       console.error(
-        "[TURN] Erro:",
+        "[TURN]",
         error
       );
 
-      return res
-        .status(500)
-        .json({
-          error:
-            "Erro interno ao gerar TURN."
-        });
+      return res.status(500).json({
+        error:
+          "Erro interno ao gerar TURN"
+      });
     }
   }
 );
 
 /* =========================================================
-   HELPERS
+   SEND
 ========================================================= */
 
 function send(ws, message) {
-  if (
-    !ws ||
-    ws.readyState !== 1
-  ) {
+  if (!ws) {
+    return false;
+  }
+
+  if (ws.readyState !== WS_OPEN) {
     return false;
   }
 
@@ -191,13 +158,17 @@ function send(ws, message) {
 
   } catch (error) {
     console.error(
-      "[SEND] Erro:",
+      "[SEND]",
       error
     );
 
     return false;
   }
 }
+
+/* =========================================================
+   BROADCAST
+========================================================= */
 
 function broadcast(
   room,
@@ -208,11 +179,15 @@ function broadcast(
     return;
   }
 
-  for (
-    const client of room.clients
-  ) {
+  for (const client of room.clients) {
     if (
       client === except
+    ) {
+      continue;
+    }
+
+    if (
+      client.readyState !== WS_OPEN
     ) {
       continue;
     }
@@ -224,6 +199,10 @@ function broadcast(
   }
 }
 
+/* =========================================================
+   PRODUCERS
+========================================================= */
+
 function getProducerList(room) {
   if (!room) {
     return [];
@@ -234,6 +213,69 @@ function getProducerList(room) {
   );
 }
 
+function updateProducerList(room) {
+  if (!room) {
+    return;
+  }
+
+  const producers =
+    getProducerList(room);
+
+  console.log(
+    `[PRODUCERS] ${room.id}:`,
+    producers
+  );
+
+  broadcast(
+    room,
+    {
+      type: "producer-list",
+      producers
+    }
+  );
+}
+
+/* =========================================================
+   VIEWERS
+========================================================= */
+
+function getViewerCount(room) {
+  if (!room) {
+    return 0;
+  }
+
+  let viewers = 0;
+
+  for (const client of room.clients) {
+    if (!client.isProducer) {
+      viewers++;
+    }
+  }
+
+  return viewers;
+}
+
+function updateViewerCount(room) {
+  if (!room) {
+    return;
+  }
+
+  const count =
+    getViewerCount(room);
+
+  broadcast(
+    room,
+    {
+      type: "viewer-count",
+      count
+    }
+  );
+}
+
+/* =========================================================
+   FIND CLIENT
+========================================================= */
+
 function findClient(
   room,
   id
@@ -242,12 +284,8 @@ function findClient(
     return null;
   }
 
-  for (
-    const client of room.clients
-  ) {
-    if (
-      client.id === id
-    ) {
+  for (const client of room.clients) {
+    if (client.id === id) {
       return client;
     }
   }
@@ -265,11 +303,7 @@ function generateRoomCode() {
 
   let code = "";
 
-  for (
-    let i = 0;
-    i < 6;
-    i++
-  ) {
+  for (let i = 0; i < 6; i++) {
     code +=
       chars[
         Math.floor(
@@ -288,164 +322,60 @@ function createRoomCode() {
   do {
     code =
       generateRoomCode();
-  } while (
-    rooms.has(code)
-  );
+  } while (rooms.has(code));
 
   return code;
 }
 
 /* =========================================================
-   ROOM UPDATES
+   REMOVE PRODUCER
 ========================================================= */
 
-function updateProducerList(
-  room
-) {
+function removeProducer(ws) {
+  const room = ws.room;
+
   if (!room) {
     return;
-  }
-
-  const producers =
-    getProducerList(room);
-
-  console.log(
-    `[ROOM ${room.id}] Produtores:`,
-    producers
-  );
-
-  broadcast(
-    room,
-    {
-      type:
-        "producer-list",
-
-      producers
-    }
-  );
-}
-
-function getViewerCount(
-  room
-) {
-  if (!room) {
-    return 0;
-  }
-
-  let viewers = 0;
-
-  for (
-    const client of room.clients
-  ) {
-    if (
-      !room.producers.has(
-        client.id
-      )
-    ) {
-      viewers++;
-    }
-  }
-
-  return viewers;
-}
-
-function updateViewerCount(
-  room
-) {
-  if (!room) {
-    return;
-  }
-
-  const count =
-    getViewerCount(room);
-
-  console.log(
-    `[ROOM ${room.id}] Viewers: ${count}`
-  );
-
-  broadcast(
-    room,
-    {
-      type:
-        "viewer-count",
-
-      count
-    }
-  );
-}
-
-/* =========================================================
-   PRODUCER
-========================================================= */
-
-function removeProducer(
-  ws
-) {
-  const room =
-    ws.room;
-
-  if (!room) {
-    return false;
   }
 
   if (
-    !room.producers.has(
-      ws.id
-    )
+    !room.producers.has(ws.id)
   ) {
-    ws.isProducer =
-      false;
-
-    return false;
+    return;
   }
 
   console.log(
-    `[PRODUCER] ${ws.id} parou de transmitir em ${room.id}`
+    `[PRODUCER] REMOVENDO ${ws.id} DA SALA ${room.id}`
   );
 
   room.producers.delete(
     ws.id
   );
 
-  ws.isProducer =
-    false;
+  ws.isProducer = false;
 
   /*
-   * Avisa todos os outros clientes
-   * que essa transmissão desapareceu.
+   * Avisa todos os viewers que a transmissão acabou.
    */
   broadcast(
     room,
     {
-      type:
-        "producer-left",
-
-      producerId:
-        ws.id
+      type: "producer-left",
+      producerId: ws.id
     },
     ws
   );
 
-  updateProducerList(
-    room
-  );
-
-  updateViewerCount(
-    room
-  );
-
-  return true;
+  updateProducerList(room);
+  updateViewerCount(room);
 }
 
 /* =========================================================
    LEAVE ROOM
 ========================================================= */
 
-function leaveRoom(
-  ws
-) {
-  const room =
-    ws.room;
+function leaveRoom(ws) {
+  const room = ws.room;
 
   if (!room) {
     return;
@@ -456,73 +386,64 @@ function leaveRoom(
   );
 
   /*
-   * Se estava transmitindo,
-   * remove primeiro.
+   * Primeiro remove o producer,
+   * caso ele esteja transmitindo.
    */
   if (
-    room.producers.has(
-      ws.id
-    )
+    room.producers.has(ws.id)
   ) {
-    room.producers.delete(
-      ws.id
-    );
-
-    ws.isProducer =
-      false;
-
-    broadcast(
-      room,
-      {
-        type:
-          "producer-left",
-
-        producerId:
-          ws.id
-      },
-      ws
-    );
+    removeProducer(ws);
   }
 
-  room.clients.delete(
-    ws
-  );
+  /*
+   * Remove o cliente da sala.
+   */
+  room.clients.delete(ws);
 
-  ws.room =
-    null;
-
-  ws.isProducer =
-    false;
+  ws.room = null;
+  ws.isProducer = false;
 
   /*
-   * Se ninguém ficou,
-   * destrói a sala.
+   * Se ainda existem clientes,
+   * atualiza o estado.
    */
-  if (
-    room.clients.size === 0
-  ) {
-    rooms.delete(
-      room.id
-    );
+  if (room.clients.size > 0) {
+    updateProducerList(room);
+    updateViewerCount(room);
+
+  } else {
+    /*
+     * Sala vazia.
+     */
+    rooms.delete(room.id);
 
     console.log(
       `[ROOM] ${room.id} removida`
     );
+  }
+}
 
-    return;
+/* =========================================================
+   VALIDATE SAME ROOM
+========================================================= */
+
+function sameRoom(
+  sender,
+  target
+) {
+  if (!sender || !target) {
+    return false;
   }
 
-  updateProducerList(
-    room
-  );
-
-  updateViewerCount(
-    room
+  return (
+    sender.room &&
+    target.room &&
+    sender.room === target.room
   );
 }
 
 /* =========================================================
-   WEBSOCKET CONNECTION
+   WEBSOCKET
 ========================================================= */
 
 wss.on(
@@ -531,30 +452,21 @@ wss.on(
     ws.id =
       crypto.randomUUID();
 
-    ws.room =
-      null;
+    ws.room = null;
 
-    ws.isProducer =
-      false;
+    ws.isProducer = false;
 
-    ws.isAlive =
-      true;
+    ws.isAlive = true;
 
     console.log(
       `[CONNECT] ${ws.id}`
     );
 
-    /*
-     * Primeiro pacote enviado ao cliente.
-     */
     send(
       ws,
       {
-        type:
-          "client-id",
-
-        id:
-          ws.id
+        type: "client-id",
+        id: ws.id
       }
     );
 
@@ -565,8 +477,7 @@ wss.on(
     ws.on(
       "pong",
       () => {
-        ws.isAlive =
-          true;
+        ws.isAlive = true;
       }
     );
 
@@ -584,20 +495,10 @@ wss.on(
             JSON.parse(
               raw.toString()
             );
+
         } catch {
           console.warn(
             `[MESSAGE] JSON inválido de ${ws.id}`
-          );
-
-          send(
-            ws,
-            {
-              type:
-                "error",
-
-              message:
-                "Mensagem inválida."
-            }
           );
 
           return;
@@ -605,8 +506,7 @@ wss.on(
 
         if (
           !msg ||
-          typeof msg.type !==
-            "string"
+          typeof msg.type !== "string"
         ) {
           return;
         }
@@ -623,6 +523,10 @@ wss.on(
           msg.type ===
           "create-room"
         ) {
+          /*
+           * Se já estava em uma sala,
+           * sai primeiro.
+           */
           if (ws.room) {
             leaveRoom(ws);
           }
@@ -631,8 +535,7 @@ wss.on(
             createRoomCode();
 
           const room = {
-            id:
-              roomId,
+            id: roomId,
 
             clients:
               new Set(),
@@ -646,19 +549,13 @@ wss.on(
             room
           );
 
-          room.clients.add(
-            ws
-          );
+          room.clients.add(ws);
 
           ws.room =
             room;
 
           ws.isProducer =
             false;
-
-          console.log(
-            `[ROOM] criada: ${roomId} por ${ws.id}`
-          );
 
           send(
             ws,
@@ -688,8 +585,12 @@ wss.on(
                 "viewer-count",
 
               count:
-                1
+                0
             }
+          );
+
+          console.log(
+            `[ROOM] criada: ${roomId} por ${ws.id}`
           );
 
           return;
@@ -726,9 +627,7 @@ wss.on(
           }
 
           const room =
-            rooms.get(
-              roomId
-            );
+            rooms.get(roomId);
 
           if (!room) {
             send(
@@ -745,35 +644,17 @@ wss.on(
             return;
           }
 
-          if (
-            ws.room &&
-            ws.room !== room
-          ) {
+          if (ws.room) {
             leaveRoom(ws);
           }
 
-          /*
-           * Evita adicionar duas vezes.
-           */
-          if (
-            !room.clients.has(ws)
-          ) {
-            room.clients.add(
-              ws
-            );
-          }
+          room.clients.add(ws);
 
           ws.room =
             room;
 
           ws.isProducer =
-            room.producers.has(
-              ws.id
-            );
-
-          console.log(
-            `[ROOM] ${ws.id} entrou em ${roomId}`
-          );
+            false;
 
           send(
             ws,
@@ -785,10 +666,6 @@ wss.on(
             }
           );
 
-          /*
-           * Envia a lista atual
-           * imediatamente para o novo cliente.
-           */
           send(
             ws,
             {
@@ -796,9 +673,7 @@ wss.on(
                 "producer-list",
 
               producers:
-                getProducerList(
-                  room
-                )
+                getProducerList(room)
             }
           );
 
@@ -809,14 +684,13 @@ wss.on(
                 "viewer-count",
 
               count:
-                getViewerCount(
-                  room
-                )
+                getViewerCount(room)
             }
           );
 
           /*
-           * Atualiza os outros clientes.
+           * Avisa os outros clientes
+           * que a lista mudou.
            */
           broadcast(
             room,
@@ -825,15 +699,15 @@ wss.on(
                 "producer-list",
 
               producers:
-                getProducerList(
-                  room
-                )
+                getProducerList(room)
             },
             ws
           );
 
-          updateViewerCount(
-            room
+          updateViewerCount(room);
+
+          console.log(
+            `[ROOM] ${ws.id} entrou em ${roomId}`
           );
 
           return;
@@ -894,11 +768,15 @@ wss.on(
               ws.id
             )
           ) {
+            console.log(
+              `[PRODUCER] ${ws.id} já está transmitindo`
+            );
+
             return;
           }
 
           /*
-           * Limite de transmissões.
+           * Limite de producers.
            */
           if (
             room.producers.size >=
@@ -918,6 +796,9 @@ wss.on(
             return;
           }
 
+          /*
+           * Registra producer.
+           */
           room.producers.set(
             ws.id,
             ws
@@ -927,12 +808,16 @@ wss.on(
             true;
 
           console.log(
-            `[PRODUCER] ${ws.id} começou a transmitir em ${room.id}`
+            `[PRODUCER] ${ws.id} COMEÇOU A TRANSMITIR`
+          );
+
+          console.log(
+            `[PRODUCER] produtores atuais:`,
+            getProducerList(room)
           );
 
           /*
-           * Avisa os espectadores
-           * sobre o novo produtor.
+           * Avisa os viewers.
            */
           broadcast(
             room,
@@ -946,13 +831,8 @@ wss.on(
             ws
           );
 
-          updateProducerList(
-            room
-          );
-
-          updateViewerCount(
-            room
-          );
+          updateProducerList(room);
+          updateViewerCount(room);
 
           return;
         }
@@ -965,6 +845,10 @@ wss.on(
           msg.type ===
           "stop-sharing"
         ) {
+          console.log(
+            `[PRODUCER] ${ws.id} enviou STOP`
+          );
+
           removeProducer(ws);
 
           return;
@@ -1014,14 +898,23 @@ wss.on(
             return;
           }
 
-          /*
-           * Não permite produtor
-           * pedir offer dele mesmo.
-           */
           if (
             producer.id ===
             ws.id
           ) {
+            return;
+          }
+
+          if (
+            !sameRoom(
+              ws,
+              producer
+            )
+          ) {
+            console.warn(
+              `[SIGNAL] salas diferentes: ${ws.id} -> ${producer.id}`
+            );
+
             return;
           }
 
@@ -1064,10 +957,6 @@ wss.on(
             );
 
           if (!targetId) {
-            console.warn(
-              "[OFFER] target ausente"
-            );
-
             return;
           }
 
@@ -1079,16 +968,14 @@ wss.on(
 
           if (!target) {
             console.warn(
-              "[OFFER] target não encontrado:",
-              targetId
+              `[OFFER] target não encontrado: ${targetId}`
             );
 
             return;
           }
 
           /*
-           * Apenas um produtor pode
-           * enviar uma offer.
+           * Somente producers podem enviar offers.
            */
           if (
             !room.producers.has(
@@ -1096,17 +983,20 @@ wss.on(
             )
           ) {
             console.warn(
-              `[OFFER] ${ws.id} não é produtor`
+              `[OFFER] ${ws.id} não é producer`
             );
 
             return;
           }
 
           if (
-            !msg.offer
+            !sameRoom(
+              ws,
+              target
+            )
           ) {
             console.warn(
-              "[OFFER] SDP ausente"
+              `[OFFER] clientes não estão na mesma sala`
             );
 
             return;
@@ -1157,10 +1047,6 @@ wss.on(
             );
 
           if (!targetId) {
-            console.warn(
-              "[ANSWER] target ausente"
-            );
-
             return;
           }
 
@@ -1172,16 +1058,35 @@ wss.on(
 
           if (!target) {
             console.warn(
-              "[ANSWER] target não encontrado:",
-              targetId
+              `[ANSWER] target não encontrado: ${targetId}`
             );
 
             return;
           }
 
-          if (!msg.answer) {
+          /*
+           * O answer deve ir para um producer.
+           */
+          if (
+            !room.producers.has(
+              target.id
+            )
+          ) {
             console.warn(
-              "[ANSWER] SDP ausente"
+              `[ANSWER] target ${target.id} não é producer`
+            );
+
+            return;
+          }
+
+          if (
+            !sameRoom(
+              ws,
+              target
+            )
+          ) {
+            console.warn(
+              `[ANSWER] clientes não estão na mesma sala`
             );
 
             return;
@@ -1231,28 +1136,11 @@ wss.on(
               msg.target || ""
             );
 
-          const producerId =
-            String(
-              msg.producerId || ""
-            );
-
           if (!targetId) {
             console.warn(
-              "[ICE] target ausente"
+              `[ICE] target ausente de ${ws.id}`
             );
 
-            return;
-          }
-
-          if (!producerId) {
-            console.warn(
-              "[ICE] producerId ausente"
-            );
-
-            return;
-          }
-
-          if (!msg.candidate) {
             return;
           }
 
@@ -1264,16 +1152,41 @@ wss.on(
 
           if (!target) {
             console.warn(
-              "[ICE] target não encontrado:",
-              targetId
+              `[ICE] target não encontrado: ${targetId}`
+            );
+
+            return;
+          }
+
+          if (
+            !sameRoom(
+              ws,
+              target
+            )
+          ) {
+            console.warn(
+              `[ICE] clientes não estão na mesma sala`
+            );
+
+            return;
+          }
+
+          const producerId =
+            String(
+              msg.producerId || ""
+            );
+
+          if (!producerId) {
+            console.warn(
+              `[ICE] producerId ausente`
             );
 
             return;
           }
 
           /*
-           * O producerId precisa representar
-           * um produtor REALMENTE ativo.
+           * O producer precisa existir
+           * neste momento.
            */
           if (
             !room.producers.has(
@@ -1281,23 +1194,15 @@ wss.on(
             )
           ) {
             console.warn(
-              `[ICE] produtor ${producerId} não está ativo`
+              `[ICE] produtor ${producerId} não está mais ativo`
             );
 
             return;
           }
 
           /*
-           * O próprio produtor pode enviar
-           * ICE para o viewer e o viewer pode
-           * enviar ICE para o produtor.
-           *
-           * Apenas retransmitimos.
+           * Repassa o candidate sem modificar.
            */
-          console.log(
-            `[SIGNAL] ICE ${ws.id} -> ${target.id} | producer=${producerId}`
-          );
-
           send(
             target,
             {
@@ -1333,9 +1238,14 @@ wss.on(
 
     ws.on(
       "close",
-      () => {
+      (code, reason) => {
         console.log(
-          `[DISCONNECT] ${ws.id}`
+          `[DISCONNECT] ${ws.id}`,
+          {
+            code,
+            reason:
+              reason?.toString() || ""
+          }
         );
 
         leaveRoom(ws);
@@ -1350,7 +1260,7 @@ wss.on(
       "error",
       error => {
         console.error(
-          `[WS ERROR] ${ws.id}:`,
+          `[WS ERROR] ${ws.id}`,
           error
         );
       }
@@ -1362,32 +1272,32 @@ wss.on(
    WEBSOCKET HEARTBEAT
 ========================================================= */
 
-const heartbeat =
+const heartbeatInterval =
   setInterval(
     () => {
-      for (
-        const ws of wss.clients
-      ) {
+      for (const ws of wss.clients) {
         if (
           ws.isAlive === false
         ) {
-          console.warn(
+          console.log(
             `[HEARTBEAT] encerrando conexão ${ws.id}`
           );
 
-          try {
-            ws.terminate();
-          } catch {}
+          ws.terminate();
 
           continue;
         }
 
-        ws.isAlive =
-          false;
+        ws.isAlive = false;
 
         try {
           ws.ping();
-        } catch {}
+        } catch (error) {
+          console.error(
+            "[HEARTBEAT]",
+            error
+          );
+        }
       }
     },
     30000
@@ -1397,13 +1307,13 @@ wss.on(
   "close",
   () => {
     clearInterval(
-      heartbeat
+      heartbeatInterval
     );
   }
 );
 
 /* =========================================================
-   SERVER START
+   START
 ========================================================= */
 
 server.listen(
@@ -1411,39 +1321,23 @@ server.listen(
   "0.0.0.0",
   () => {
     console.log(
-      "========================================"
+      `========================================`
     );
 
     console.log(
-      " ScreenCast Signaling Server"
+      ` ScreenCast Signaling Server`
     );
 
     console.log(
-      "========================================"
+      ` Porta: ${PORT}`
     );
 
     console.log(
-      `Porta: ${PORT}`
+      ` Max producers: ${MAX_PRODUCERS}`
     );
 
     console.log(
-      `Máximo de produtores: ${MAX_PRODUCERS}`
-    );
-
-    console.log(
-      "WebSocket: ATIVO"
-    );
-
-    console.log(
-      "TURN endpoint: /turn-credentials"
-    );
-
-    console.log(
-      "Health: /health"
-    );
-
-    console.log(
-      "========================================"
+      `========================================`
     );
   }
 );
