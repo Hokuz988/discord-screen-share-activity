@@ -26,6 +26,7 @@ const SIGNALING_URL =
   "wss://screen-share-activity.onrender.com";
 
 const TURN_SERVER_URL =
+  import.meta.env.VITE_TURN_SERVER_URL ||
   "https://screen-share-activity.onrender.com";
 
 const MAX_PRODUCERS = 3;
@@ -33,33 +34,18 @@ const MAX_PRODUCERS = 3;
 let discordSdk = null;
 
 /* =========================================================
-   TURN
+   TURN / ICE
 ========================================================= */
 
-let cachedIceServers = null;
-
 async function getIceServers() {
-  if (cachedIceServers) {
-    console.log(
-      "[TURN] usando servidores em cache"
-    );
-
-    return cachedIceServers;
-  }
-
   try {
-    console.log(
-      "[TURN] buscando credenciais..."
+    const response = await fetch(
+      `${TURN_SERVER_URL}/turn-credentials`,
+      {
+        method: "GET",
+        cache: "no-store"
+      }
     );
-
-    const response =
-      await fetch(
-        `${TURN_SERVER_URL}/turn-credentials`,
-        {
-          method: "GET",
-          cache: "no-store"
-        }
-      );
 
     if (!response.ok) {
       throw new Error(
@@ -72,135 +58,27 @@ async function getIceServers() {
 
     if (
       !data ||
-      !Array.isArray(
-        data.iceServers
-      )
+      !Array.isArray(data.iceServers) ||
+      data.iceServers.length === 0
     ) {
       throw new Error(
         "Resposta TURN inválida."
       );
     }
 
-    /*
-     * A Cloudflare retorna também
-     * portas alternativas como 53.
-     *
-     * Navegadores podem bloquear a
-     * porta 53 para TURN, então
-     * removemos essas URLs.
-     */
-    const filtered =
-      data.iceServers
-        .map(server => {
-          if (
-            !server ||
-            !server.urls
-          ) {
-            return null;
-          }
-
-          const urls =
-            Array.isArray(
-              server.urls
-            )
-              ? server.urls
-              : [server.urls];
-
-          const validUrls =
-            urls.filter(
-              url => {
-                if (
-                  typeof url !==
-                  "string"
-                ) {
-                  return false;
-                }
-
-                /*
-                 * Remove:
-                 *
-                 * :53
-                 * :53?transport=udp
-                 * :53?transport=tcp
-                 */
-                if (
-                  /:(53)(\?|$)/.test(
-                    url
-                  )
-                ) {
-                  return false;
-                }
-
-                return true;
-              }
-            );
-
-          if (
-            validUrls.length === 0
-          ) {
-            return null;
-          }
-
-          return {
-            ...server,
-            urls: validUrls
-          };
-        })
-        .filter(Boolean);
-
-    /*
-     * STUN local de fallback.
-     */
-    const hasStun =
-      filtered.some(
-        server => {
-          const urls =
-            Array.isArray(
-              server.urls
-            )
-              ? server.urls
-              : [server.urls];
-
-          return urls.some(
-            url =>
-              typeof url ===
-                "string" &&
-              url.startsWith(
-                "stun:"
-              )
-          );
-        }
-      );
-
-    if (!hasStun) {
-      filtered.unshift({
-        urls: [
-          "stun:stun.cloudflare.com:3478",
-          "stun:stun.l.google.com:19302"
-        ]
-      });
-    }
-
     console.log(
-      "[TURN] servidores filtrados:",
-      filtered
+      "[TURN] Servidores recebidos:",
+      data.iceServers
     );
 
-    cachedIceServers =
-      filtered;
-
-    return filtered;
+    return data.iceServers;
 
   } catch (error) {
     console.warn(
-      "[TURN] indisponível:",
+      "[TURN] indisponível, usando STUN:",
       error
     );
 
-    /*
-     * Mesmo sem TURN, tenta conexão
-     * direta via STUN.
-     */
     return [
       {
         urls: [
@@ -226,9 +104,7 @@ function App() {
   const [
     status,
     setStatus
-  ] = useState(
-    "Conectando..."
-  );
+  ] = useState("Conectando...");
 
   const [
     sharing,
@@ -273,9 +149,7 @@ function App() {
   const [
     selectedProducer,
     setSelectedProducer
-  ] = useState(
-    "local"
-  );
+  ] = useState("local");
 
   const [
     audioStates,
@@ -297,30 +171,43 @@ function App() {
   const localStream =
     useRef(null);
 
+  /*
+   * producerId -> MediaStream
+   */
   const streams =
     useRef(new Map());
 
+  /*
+   * producerId -> Set<HTMLVideoElement>
+   */
   const videoRefs =
     useRef(new Map());
 
   /*
+   * producerId->local
    * local->viewer
-   * producer->local
    */
   const peerConnections =
     useRef(new Map());
 
   /*
-   * peerKey -> ICE[]
+   * peerKey -> ICE candidates
    */
   const pendingCandidates =
     useRef(new Map());
 
   /*
-   * Producers para os quais
-   * já pedimos offer.
+   * Producer IDs para os quais
+   * já solicitamos offer.
    */
   const requestedOffers =
+    useRef(new Set());
+
+  /*
+   * Impede duas negociações simultâneas
+   * para o mesmo viewer.
+   */
+  const creatingProducerPeers =
     useRef(new Set());
 
   const roomId =
@@ -330,7 +217,59 @@ function App() {
     useRef("");
 
   /* =======================================================
-     VIDEO
+     SAFE SEND
+  ======================================================= */
+
+  function send(message) {
+    if (
+      !ws.current ||
+      ws.current.readyState !==
+        WebSocket.OPEN
+    ) {
+      console.warn(
+        "[SEND] WebSocket não conectado:",
+        message
+      );
+
+      return false;
+    }
+
+    const payload = {
+      ...message
+    };
+
+    if (
+      !payload.roomId &&
+      roomId.current
+    ) {
+      payload.roomId =
+        roomId.current;
+    }
+
+    try {
+      console.log(
+        "[SEND]",
+        payload
+      );
+
+      ws.current.send(
+        JSON.stringify(payload)
+      );
+
+      return true;
+
+    } catch (error) {
+      console.error(
+        "[SEND]",
+        error
+      );
+
+      return false;
+    }
+  }
+
+  /* =======================================================
+     VIDEO REGISTER
   ======================================================= */
 
   function registerVideo(
@@ -380,47 +319,43 @@ function App() {
       );
 
     if (!stream) {
-      console.log(
-        "[VIDEO] aguardando stream:",
-        producerId
-      );
-
       return;
     }
 
     element.srcObject =
       stream;
 
-    const play =
+    const playVideo =
       () => {
-        element
-          .play()
+        element.play()
           .then(() => {
             console.log(
               "[VIDEO] PLAY OK:",
               producerId
             );
           })
-          .catch(
-            error => {
-              console.warn(
-                "[VIDEO] play:",
-                producerId,
-                error
-              );
-            }
-          );
+          .catch(error => {
+            console.warn(
+              "[VIDEO] play bloqueado:",
+              producerId,
+              error
+            );
+          });
       };
 
     if (
       element.readyState >= 2
     ) {
-      play();
+      playVideo();
     } else {
       element.onloadedmetadata =
-        play;
+        playVideo;
     }
   }
+
+  /* =======================================================
+     UNREGISTER VIDEO
+  ======================================================= */
 
   function unregisterVideo(
     producerId,
@@ -448,6 +383,10 @@ function App() {
     }
   }
 
+  /* =======================================================
+     ATTACH STREAM
+  ======================================================= */
+
   function attachStream(
     producerId,
     stream
@@ -456,25 +395,9 @@ function App() {
       return;
     }
 
-    console.log(
-      "[VIDEO] attachStream:",
-      producerId,
-      stream
-        .getTracks()
-        .map(
-          track =>
-            `${track.kind}:${track.readyState}`
-        )
-    );
-
     streams.current.set(
       producerId,
       stream
-    );
-
-    setStreamVersion(
-      version =>
-        version + 1
     );
 
     const attach =
@@ -509,8 +432,7 @@ function App() {
             true;
 
           video.muted =
-            producerId ===
-              "local"
+            producerId === "local"
               ? true
               : !(
                   audioStates[
@@ -520,34 +442,31 @@ function App() {
 
           video.volume = 1;
 
-          const play =
+          const playVideo =
             () => {
-              video
-                .play()
+              video.play()
                 .then(() => {
                   console.log(
                     "[VIDEO] PLAY OK:",
                     producerId
                   );
                 })
-                .catch(
-                  error => {
-                    console.warn(
-                      "[VIDEO] play bloqueado:",
-                      producerId,
-                      error
-                    );
-                  }
-                );
+                .catch(error => {
+                  console.warn(
+                    "[VIDEO] play:",
+                    producerId,
+                    error
+                  );
+                });
             };
 
           if (
             video.readyState >= 2
           ) {
-            play();
+            playVideo();
           } else {
             video.onloadedmetadata =
-              play;
+              playVideo;
           }
         }
       };
@@ -570,6 +489,10 @@ function App() {
     );
   }
 
+  /* =======================================================
+     CLEAR VIDEO
+  ======================================================= */
+
   function clearVideo(
     producerId
   ) {
@@ -588,10 +511,1721 @@ function App() {
     ) {
       try {
         video.pause();
-        video.srcObject =
-          null;
+        video.srcObject = null;
       } catch {}
     }
+  }
+
+  /* =======================================================
+     CREATE PEER CONNECTION
+  ======================================================= */
+
+  async function createPeer(
+    key
+  ) {
+    const iceServers =
+      await getIceServers();
+
+    console.log(
+      "[WEBRTC] Criando RTCPeerConnection:",
+      key
+    );
+
+    const pc =
+      new RTCPeerConnection({
+        iceServers,
+        iceTransportPolicy: "all",
+        bundlePolicy: "max-bundle",
+        rtcpMuxPolicy: "require"
+      });
+
+    peerConnections.current.set(
+      key,
+      pc
+    );
+
+    pendingCandidates.current.set(
+      key,
+      []
+    );
+
+    return pc;
+  }
+
+  /* =======================================================
+     CLOSE PEER
+  ======================================================= */
+
+  function closePeer(
+    key
+  ) {
+    const pc =
+      peerConnections.current.get(
+        key
+      );
+
+    if (pc) {
+      try {
+        pc.onicecandidate = null;
+        pc.ontrack = null;
+        pc.onconnectionstatechange = null;
+        pc.oniceconnectionstatechange = null;
+        pc.close();
+      } catch {}
+    }
+
+    peerConnections.current.delete(
+      key
+    );
+
+    pendingCandidates.current.delete(
+      key
+    );
+  }
+
+  /* =======================================================
+     REQUEST OFFER
+  ======================================================= */
+
+  function requestOffer(
+    producerId
+  ) {
+    if (!producerId) {
+      return;
+    }
+
+    if (
+      producerId ===
+      myId.current
+    ) {
+      return;
+    }
+
+    if (!roomId.current) {
+      return;
+    }
+
+    if (
+      requestedOffers.current.has(
+        producerId
+      )
+    ) {
+      return;
+    }
+
+    requestedOffers.current.add(
+      producerId
+    );
+
+    console.log(
+      "[VIEWER] request-offer:",
+      producerId
+    );
+
+    send({
+      type:
+        "request-offer",
+
+      producerId
+    });
+  }
+
+  /* =======================================================
+     CREATE PRODUCER PEER
+  ======================================================= */
+
+  async function createProducerPeer(
+    viewerId
+  ) {
+    if (
+      !viewerId ||
+      !localStream.current
+    ) {
+      return;
+    }
+
+    if (
+      viewerId ===
+      myId.current
+    ) {
+      return;
+    }
+
+    const key =
+      `local->${viewerId}`;
+
+    if (
+      creatingProducerPeers.current.has(
+        viewerId
+      )
+    ) {
+      console.log(
+        "[PRODUCER] negociação já em andamento:",
+        viewerId
+      );
+
+      return;
+    }
+
+    const existing =
+      peerConnections.current.get(
+        key
+      );
+
+    if (existing) {
+      if (
+        existing.connectionState !==
+          "failed" &&
+        existing.connectionState !==
+          "closed"
+      ) {
+        console.log(
+          "[PRODUCER] peer já existe:",
+          key,
+          existing.connectionState
+        );
+
+        return;
+      }
+
+      closePeer(key);
+    }
+
+    creatingProducerPeers.current.add(
+      viewerId
+    );
+
+    try {
+      console.log(
+        "[PRODUCER] criando peer:",
+        key
+      );
+
+      const pc =
+        await createPeer(key);
+
+      /*
+       * Adiciona as tracks da tela.
+       */
+      const tracks =
+        localStream.current.getTracks();
+
+      for (
+        const track
+        of tracks
+      ) {
+        try {
+          pc.addTrack(
+            track,
+            localStream.current
+          );
+        } catch (error) {
+          console.error(
+            "[PRODUCER] addTrack:",
+            error
+          );
+        }
+      }
+
+      /*
+       * ICE producer -> viewer.
+       */
+      pc.onicecandidate =
+        event => {
+          if (!event.candidate) {
+            return;
+          }
+
+          const candidate =
+            event.candidate.toJSON
+              ? event.candidate.toJSON()
+              : event.candidate;
+
+          console.log(
+            "[PRODUCER] ICE ->",
+            viewerId
+          );
+
+          send({
+            type:
+              "ice",
+
+            target:
+              viewerId,
+
+            producerId:
+              myId.current,
+
+            candidate
+          });
+        };
+
+      /*
+       * Estado ICE.
+       */
+      pc.oniceconnectionstatechange =
+        () => {
+          console.log(
+            "[PRODUCER] ICE connection:",
+            viewerId,
+            pc.iceConnectionState
+          );
+
+          if (
+            pc.iceConnectionState ===
+            "failed"
+          ) {
+            console.warn(
+              "[PRODUCER] ICE falhou:",
+              viewerId
+            );
+
+            /*
+             * Permite nova negociação.
+             */
+            closePeer(key);
+
+            setTimeout(() => {
+              if (
+                localStream.current &&
+                roomId.current
+              ) {
+                creatingProducerPeers.current.delete(
+                  viewerId
+                );
+
+                send({
+                  type:
+                    "request-offer",
+
+                  producerId:
+                    myId.current
+                });
+              }
+            }, 1000);
+          }
+        };
+
+      /*
+       * Estado WebRTC.
+       */
+      pc.onconnectionstatechange =
+        () => {
+          console.log(
+            "[PRODUCER]",
+            viewerId,
+            "connection:",
+            pc.connectionState
+          );
+
+          if (
+            pc.connectionState ===
+              "connected"
+          ) {
+            console.log(
+              "[PRODUCER] conexão estabelecida:",
+              viewerId
+            );
+          }
+
+          if (
+            pc.connectionState ===
+              "failed" ||
+            pc.connectionState ===
+              "closed"
+          ) {
+            console.warn(
+              "[PRODUCER] conexão falhou:",
+              viewerId
+            );
+
+            if (
+              peerConnections.current.get(
+                key
+              ) === pc
+            ) {
+              closePeer(key);
+            }
+          }
+        };
+
+      /*
+       * Cria offer.
+       */
+      const offer =
+        await pc.createOffer({
+          offerToReceiveAudio: false,
+          offerToReceiveVideo: false
+        });
+
+      await pc.setLocalDescription(
+        offer
+      );
+
+      /*
+       * Espera o ICE gathering terminar.
+       *
+       * Isso torna a negociação mais robusta
+       * em navegadores/ambientes onde candidates
+       * podem chegar muito cedo.
+       */
+      await waitForIceGatheringComplete(
+        pc
+      );
+
+      if (
+        !pc.localDescription
+      ) {
+        throw new Error(
+          "localDescription não criada."
+        );
+      }
+
+      console.log(
+        "[PRODUCER] enviando offer:",
+        viewerId
+      );
+
+      send({
+        type:
+          "offer",
+
+        target:
+          viewerId,
+
+        producerId:
+          myId.current,
+
+        offer:
+          pc.localDescription
+      });
+
+    } catch (error) {
+      console.error(
+        "[PRODUCER] erro ao criar offer:",
+        viewerId,
+        error
+      );
+
+      closePeer(key);
+
+    } finally {
+      creatingProducerPeers.current.delete(
+        viewerId
+      );
+    }
+  }
+
+  /* =======================================================
+     WAIT ICE GATHERING
+  ======================================================= */
+
+  function waitForIceGatheringComplete(
+    pc
+  ) {
+    return new Promise(
+      resolve => {
+        if (
+          pc.iceGatheringState ===
+          "complete"
+        ) {
+          resolve();
+          return;
+        }
+
+        const timeout =
+          setTimeout(
+            () => {
+              resolve();
+            },
+            5000
+          );
+
+        const check =
+          () => {
+            if (
+              pc.iceGatheringState ===
+              "complete"
+            ) {
+              clearTimeout(
+                timeout
+              );
+
+              pc.removeEventListener(
+                "icegatheringstatechange",
+                check
+              );
+
+              resolve();
+            }
+          };
+
+        pc.addEventListener(
+          "icegatheringstatechange",
+          check
+        );
+      }
+    );
+  }
+
+  /* =======================================================
+     HANDLE OFFER
+  ======================================================= */
+
+  async function handleOffer(
+    msg
+  ) {
+    const producerId =
+      String(
+        msg.producerId ||
+        msg.from ||
+        ""
+      );
+
+    const producerFrom =
+      String(
+        msg.from ||
+        msg.producerId ||
+        ""
+      );
+
+    if (
+      !producerId ||
+      !producerFrom ||
+      !msg.offer
+    ) {
+      console.warn(
+        "[VIEWER] offer inválida:",
+        msg
+      );
+
+      return;
+    }
+
+    if (
+      producerId ===
+      myId.current
+    ) {
+      return;
+    }
+
+    const key =
+      `${producerId}->local`;
+
+    console.log(
+      "[VIEWER] offer recebida:",
+      producerId
+    );
+
+    /*
+     * Se já existe um peer saudável,
+     * não cria outro.
+     */
+    const existing =
+      peerConnections.current.get(
+        key
+      );
+
+    if (existing) {
+      if (
+        existing.connectionState !==
+          "failed" &&
+        existing.connectionState !==
+          "closed"
+      ) {
+        console.log(
+          "[VIEWER] peer já existe:",
+          key,
+          existing.connectionState
+        );
+
+        return;
+      }
+
+      closePeer(key);
+    }
+
+    try {
+      const pc =
+        await createPeer(key);
+
+      /*
+       * TRACK
+       */
+      pc.ontrack =
+        event => {
+          console.log(
+            "[VIEWER] TRACK:",
+            producerId,
+            event.track.kind,
+            event.track.readyState
+          );
+
+          let stream =
+            event.streams?.[0];
+
+          if (!stream) {
+            stream =
+              streams.current.get(
+                producerId
+              );
+
+            if (!stream) {
+              stream =
+                new MediaStream();
+            }
+
+            const exists =
+              stream
+                .getTracks()
+                .some(
+                  track =>
+                    track.id ===
+                    event.track.id
+                );
+
+            if (!exists) {
+              stream.addTrack(
+                event.track
+              );
+            }
+          }
+
+          streams.current.set(
+            producerId,
+            stream
+          );
+
+          console.log(
+            "[VIEWER] STREAM:",
+            producerId,
+            stream
+              .getTracks()
+              .map(
+                track =>
+                  `${track.kind}:${track.readyState}`
+              )
+          );
+
+          setStreamVersion(
+            version =>
+              version + 1
+          );
+
+          attachStream(
+            producerId,
+            stream
+          );
+
+          setProducers(
+            current => {
+              if (
+                current.includes(
+                  producerId
+                )
+              ) {
+                return current;
+              }
+
+              if (
+                current.length >=
+                MAX_PRODUCERS
+              ) {
+                return current;
+              }
+
+              return [
+                ...current,
+                producerId
+              ];
+            }
+          );
+        };
+
+      /*
+       * ICE viewer -> producer.
+       */
+      pc.onicecandidate =
+        event => {
+          if (!event.candidate) {
+            return;
+          }
+
+          const candidate =
+            event.candidate.toJSON
+              ? event.candidate.toJSON()
+              : event.candidate;
+
+          console.log(
+            "[VIEWER] ICE ->",
+            producerFrom
+          );
+
+          send({
+            type:
+              "ice",
+
+            target:
+              producerFrom,
+
+            producerId,
+
+            candidate
+          });
+        };
+
+      /*
+       * ICE state.
+       */
+      pc.oniceconnectionstatechange =
+        () => {
+          console.log(
+            "[VIEWER] ICE:",
+            producerId,
+            pc.iceConnectionState
+          );
+
+          if (
+            pc.iceConnectionState ===
+            "connected" ||
+            pc.iceConnectionState ===
+            "completed"
+          ) {
+            setStatus(
+              "Transmissão conectada"
+            );
+          }
+
+          if (
+            pc.iceConnectionState ===
+            "failed"
+          ) {
+            console.warn(
+              "[VIEWER] ICE falhou:",
+              producerId
+            );
+          }
+        };
+
+      /*
+       * Connection state.
+       */
+      pc.onconnectionstatechange =
+        () => {
+          console.log(
+            "[VIEWER]",
+            producerId,
+            "connection:",
+            pc.connectionState
+          );
+
+          if (
+            pc.connectionState ===
+            "connected"
+          ) {
+            setStatus(
+              "Transmissão conectada"
+            );
+
+            const stream =
+              streams.current.get(
+                producerId
+              );
+
+            if (stream) {
+              attachStream(
+                producerId,
+                stream
+              );
+            }
+          }
+
+          if (
+            pc.connectionState ===
+              "failed" ||
+            pc.connectionState ===
+              "closed"
+          ) {
+            console.warn(
+              "[VIEWER] conexão encerrada:",
+              producerId
+            );
+          }
+        };
+
+      /*
+       * Remote description.
+       */
+      await pc.setRemoteDescription(
+        msg.offer
+      );
+
+      console.log(
+        "[VIEWER] remoteDescription OK:",
+        producerId
+      );
+
+      /*
+       * Agora podemos adicionar
+       * candidates que chegaram antes.
+       */
+      await flushPendingCandidates(
+        key
+      );
+
+      /*
+       * Answer.
+       */
+      const answer =
+        await pc.createAnswer();
+
+      await pc.setLocalDescription(
+        answer
+      );
+
+      await waitForIceGatheringComplete(
+        pc
+      );
+
+      if (
+        !pc.localDescription
+      ) {
+        throw new Error(
+          "localDescription do viewer não criada."
+        );
+      }
+
+      console.log(
+        "[VIEWER] enviando answer:",
+        producerId
+      );
+
+      send({
+        type:
+          "answer",
+
+        target:
+          producerFrom,
+
+        producerId,
+
+        answer:
+          pc.localDescription
+      });
+
+    } catch (error) {
+      console.error(
+        "[VIEWER] erro ao processar offer:",
+        producerId,
+        error
+      );
+
+      closePeer(key);
+    }
+  }
+
+  /* =======================================================
+     HANDLE ANSWER
+  ======================================================= */
+
+  async function handleAnswer(
+    msg
+  ) {
+    const viewerId =
+      String(
+        msg.from ||
+        ""
+      );
+
+    if (!viewerId) {
+      return;
+    }
+
+    const key =
+      `local->${viewerId}`;
+
+    const pc =
+      peerConnections.current.get(
+        key
+      );
+
+    if (!pc) {
+      console.warn(
+        "[PRODUCER] peer não encontrado:",
+        key
+      );
+
+      return;
+    }
+
+    try {
+      if (
+        pc.signalingState !==
+        "have-local-offer"
+      ) {
+        console.warn(
+          "[PRODUCER] estado inesperado:",
+          pc.signalingState
+        );
+
+        return;
+      }
+
+      await pc.setRemoteDescription(
+        msg.answer
+      );
+
+      console.log(
+        "[PRODUCER] answer recebida:",
+        viewerId
+      );
+
+      await flushPendingCandidates(
+        key
+      );
+
+    } catch (error) {
+      console.error(
+        "[PRODUCER] erro answer:",
+        viewerId,
+        error
+      );
+    }
+  }
+
+  /* =======================================================
+     HANDLE ICE
+  ======================================================= */
+
+  async function handleIce(
+    msg
+  ) {
+    if (!msg.candidate) {
+      return;
+    }
+
+    const producerId =
+      String(
+        msg.producerId ||
+        ""
+      );
+
+    const from =
+      String(
+        msg.from ||
+        ""
+      );
+
+    if (
+      !producerId ||
+      !from
+    ) {
+      console.warn(
+        "[ICE] mensagem incompleta:",
+        msg
+      );
+
+      return;
+    }
+
+    let key;
+
+    /*
+     * ICE vindo do viewer para mim.
+     */
+    if (
+      producerId ===
+      myId.current
+    ) {
+      key =
+        `local->${from}`;
+    }
+
+    /*
+     * ICE vindo do producer para mim.
+     */
+    else {
+      key =
+        `${producerId}->local`;
+    }
+
+    let pc =
+      peerConnections.current.get(
+        key
+      );
+
+    /*
+     * Peer ainda não existe.
+     */
+    if (!pc) {
+      console.log(
+        "[ICE] peer ainda não existe, enfileirando:",
+        key
+      );
+
+      if (
+        !pendingCandidates.current.has(
+          key
+        )
+      ) {
+        pendingCandidates.current.set(
+          key,
+          []
+        );
+      }
+
+      pendingCandidates.current
+        .get(key)
+        .push(
+          msg.candidate
+        );
+
+      return;
+    }
+
+    /*
+     * Remote description ainda não foi
+     * aplicada.
+     */
+    if (
+      !pc.remoteDescription
+    ) {
+      console.log(
+        "[ICE] aguardando remoteDescription:",
+        key
+      );
+
+      if (
+        !pendingCandidates.current.has(
+          key
+        )
+      ) {
+        pendingCandidates.current.set(
+          key,
+          []
+        );
+      }
+
+      pendingCandidates.current
+        .get(key)
+        .push(
+          msg.candidate
+        );
+
+      return;
+    }
+
+    try {
+      await pc.addIceCandidate(
+        msg.candidate
+      );
+
+      console.log(
+        "[ICE] candidato adicionado:",
+        key
+      );
+
+    } catch (error) {
+      console.warn(
+        "[ICE] erro ao adicionar:",
+        key,
+        error
+      );
+    }
+  }
+
+  /* =======================================================
+     FLUSH ICE
+  ======================================================= */
+
+  async function flushPendingCandidates(
+    key
+  ) {
+    const pc =
+      peerConnections.current.get(
+        key
+      );
+
+    if (!pc) {
+      return;
+    }
+
+    if (
+      !pc.remoteDescription
+    ) {
+      return;
+    }
+
+    const list =
+      pendingCandidates.current.get(
+        key
+      );
+
+    if (
+      !list ||
+      list.length === 0
+    ) {
+      return;
+    }
+
+    pendingCandidates.current.delete(
+      key
+    );
+
+    console.log(
+      `[ICE] processando ${list.length} candidatos:`,
+      key
+    );
+
+    for (
+      const candidate
+      of list
+    ) {
+      try {
+        await pc.addIceCandidate(
+          candidate
+        );
+
+        console.log(
+          "[ICE] candidato pendente OK:",
+          key
+        );
+
+      } catch (error) {
+        console.warn(
+          "[ICE] candidato pendente falhou:",
+          key,
+          error
+        );
+      }
+    }
+  }
+
+  /* =======================================================
+     REMOVE REMOTE PRODUCER
+  ======================================================= */
+
+  function removeRemoteProducer(
+    producerId
+  ) {
+    if (!producerId) {
+      return;
+    }
+
+    console.log(
+      "[REMOVE PRODUCER]",
+      producerId
+    );
+
+    requestedOffers.current.delete(
+      producerId
+    );
+
+    const key =
+      `${producerId}->local`;
+
+    closePeer(key);
+
+    clearVideo(
+      producerId
+    );
+
+    streams.current.delete(
+      producerId
+    );
+
+    videoRefs.current.delete(
+      producerId
+    );
+
+    setProducers(
+      current =>
+        current.filter(
+          id =>
+            id !==
+            producerId
+        )
+    );
+
+    setAudioStates(
+      current => {
+        const next = {
+          ...current
+        };
+
+        delete next[
+          producerId
+        ];
+
+        return next;
+      }
+    );
+
+    setSelectedProducer(
+      current => {
+        if (
+          current !==
+          producerId
+        ) {
+          return current;
+        }
+
+        return "local";
+      }
+    );
+
+    setStreamVersion(
+      version =>
+        version + 1
+    );
+  }
+
+  /* =======================================================
+     START SHARING
+  ======================================================= */
+
+  async function startSharing() {
+    setError("");
+
+    if (!inRoom) {
+      setError(
+        "Entre em uma sala primeiro."
+      );
+
+      return;
+    }
+
+    if (sharing) {
+      return;
+    }
+
+    /*
+     * Conta apenas produtores remotos.
+     * O local ainda não está na lista até
+     * o servidor confirmar.
+     */
+    if (
+      producers.length >=
+      MAX_PRODUCERS
+    ) {
+      setError(
+        `A sala já possui ${MAX_PRODUCERS} transmissões ativas.`
+      );
+
+      return;
+    }
+
+    try {
+      console.log(
+        "[SCREEN] solicitando captura..."
+      );
+
+      const stream =
+        await navigator.mediaDevices
+          .getDisplayMedia({
+            video: {
+              frameRate: {
+                ideal: 30,
+                max: 60
+              },
+
+              width: {
+                ideal: 1920
+              },
+
+              height: {
+                ideal: 1080
+              }
+            },
+
+            audio: true
+          });
+
+      console.log(
+        "[SCREEN] captura iniciada:",
+        stream
+      );
+
+      localStream.current =
+        stream;
+
+      streams.current.set(
+        "local",
+        stream
+      );
+
+      setAudioStates(
+        current => ({
+          ...current,
+          local: false
+        })
+      );
+
+      setSharing(true);
+
+      setSelectedProducer(
+        "local"
+      );
+
+      const sent =
+        send({
+          type:
+            "start-sharing"
+        });
+
+      if (!sent) {
+        stream
+          .getTracks()
+          .forEach(
+            track => {
+              try {
+                track.stop();
+              } catch {}
+            }
+          );
+
+        localStream.current =
+          null;
+
+        streams.current.delete(
+          "local"
+        );
+
+        setSharing(false);
+
+        setError(
+          "Servidor de sinalização não está conectado."
+        );
+
+        return;
+      }
+
+      setStatus(
+        "Você está transmitindo"
+      );
+
+      const videoTrack =
+        stream.getVideoTracks()[0];
+
+      if (videoTrack) {
+        videoTrack.onended =
+          () => {
+            console.log(
+              "[SCREEN] captura encerrada."
+            );
+
+            stopSharing();
+          };
+      }
+
+      attachStream(
+        "local",
+        stream
+      );
+
+      setStreamVersion(
+        version =>
+          version + 1
+      );
+
+    } catch (error) {
+      console.error(
+        "[SCREEN] erro:",
+        error
+      );
+
+      if (
+        error?.name ===
+        "NotAllowedError"
+      ) {
+        return;
+      }
+
+      setError(
+        "Não foi possível iniciar a captura."
+      );
+    }
+  }
+
+  /* =======================================================
+     STOP SHARING
+  ======================================================= */
+
+  function stopSharing() {
+    if (
+      !localStream.current &&
+      !sharing
+    ) {
+      return;
+    }
+
+    console.log(
+      "[SCREEN] parando transmissão..."
+    );
+
+    if (
+      ws.current &&
+      ws.current.readyState ===
+        WebSocket.OPEN &&
+      roomId.current
+    ) {
+      send({
+        type:
+          "stop-sharing"
+      });
+    }
+
+    /*
+     * Fecha todos os peers producer->viewer.
+     */
+    for (
+      const [
+        key
+      ]
+      of peerConnections.current
+    ) {
+      if (
+        key.startsWith(
+          "local->"
+        )
+      ) {
+        closePeer(key);
+      }
+    }
+
+    creatingProducerPeers.current.clear();
+
+    /*
+     * Para captura.
+     */
+    if (
+      localStream.current
+    ) {
+      localStream.current
+        .getTracks()
+        .forEach(
+          track => {
+            try {
+              track.stop();
+            } catch {}
+          }
+        );
+    }
+
+    localStream.current =
+      null;
+
+    streams.current.delete(
+      "local"
+    );
+
+    clearVideo(
+      "local"
+    );
+
+    setSharing(false);
+
+    setAudioStates(
+      current => {
+        const next = {
+          ...current
+        };
+
+        delete next.local;
+
+        return next;
+      }
+    );
+
+    setSelectedProducer(
+      current => {
+        if (
+          current ===
+          "local"
+        ) {
+          return (
+            producers[0] ||
+            "local"
+          );
+        }
+
+        return current;
+      }
+    );
+
+    setStatus(
+      "Servidor conectado"
+    );
+
+    setStreamVersion(
+      version =>
+        version + 1
+    );
+  }
+
+  /* =======================================================
+     CREATE ROOM
+  ======================================================= */
+
+  function createRoom() {
+    setError("");
+
+    send({
+      type:
+        "create-room"
+    });
+  }
+
+  /* =======================================================
+     JOIN ROOM
+  ======================================================= */
+
+  function joinRoom() {
+    setError("");
+
+    const code =
+      roomInput
+        .trim()
+        .toUpperCase();
+
+    if (!code) {
+      setError(
+        "Digite o código da sala."
+      );
+
+      return;
+    }
+
+    send({
+      type:
+        "join-room",
+
+      roomId:
+        code
+    });
+  }
+
+  /* =======================================================
+     LEAVE ROOM
+  ======================================================= */
+
+  function leaveRoom() {
+    if (
+      ws.current &&
+      ws.current.readyState ===
+      WebSocket.OPEN
+    ) {
+      send({
+        type:
+          "leave-room"
+      });
+    }
+
+    cleanupStreams();
+
+    roomId.current =
+      "";
+
+    setRoomCode("");
+    setCurrentRoom("");
+    setInRoom(false);
+    setSharing(false);
+    setProducers([]);
+    setSelectedProducer(
+      "local"
+    );
+    setViewerCount(0);
+
+    setStatus(
+      "Servidor conectado"
+    );
+  }
+
+  /* =======================================================
+     AUDIO
+  ======================================================= */
+
+  function toggleAudio(
+    producerId
+  ) {
+    const next =
+      !(
+        audioStates[
+          producerId
+        ] ?? false
+      );
+
+    setAudioStates(
+      current => ({
+        ...current,
+        [producerId]:
+          next
+      })
+    );
+
+    const videos =
+      videoRefs.current.get(
+        producerId
+      );
+
+    if (!videos) {
+      return;
+    }
+
+    for (
+      const video
+      of videos
+    ) {
+      video.muted =
+        !next;
+
+      video.volume = 1;
+
+      if (next) {
+        video.play()
+          .catch(
+            () => {}
+          );
+      }
+    }
+  }
+
+  /* =======================================================
+     SELECT PRODUCER
+  ======================================================= */
+
+  function selectProducer(
+    producerId
+  ) {
+    setSelectedProducer(
+      producerId
+    );
+
+    setTimeout(
+      () => {
+        const stream =
+          streams.current.get(
+            producerId
+          );
+
+        if (!stream) {
+          return;
+        }
+
+        attachStream(
+          producerId,
+          stream
+        );
+      },
+      0
+    );
+  }
+
+  /* =======================================================
+     CLEANUP STREAMS
+  ======================================================= */
+
+  function cleanupStreams() {
+    /*
+     * Para local.
+     */
+    if (
+      localStream.current
+    ) {
+      localStream.current
+        .getTracks()
+        .forEach(
+          track => {
+            try {
+              track.stop();
+            } catch {}
+          }
+        );
+    }
+
+    localStream.current =
+      null;
+
+    /*
+     * Fecha peers.
+     */
+    for (
+      const [
+        key
+      ]
+      of peerConnections.current
+    ) {
+      closePeer(key);
+    }
+
+    /*
+     * Limpa streams.
+     */
+    for (
+      const stream
+      of streams.current.values()
+    ) {
+      stream
+        .getTracks()
+        .forEach(
+          track => {
+            try {
+              track.stop();
+            } catch {}
+          }
+        );
+    }
+
+    streams.current.clear();
+
+    pendingCandidates.current.clear();
+
+    requestedOffers.current.clear();
+
+    creatingProducerPeers.current.clear();
+
+    /*
+     * Limpa vídeos.
+     */
+    for (
+      const videos
+      of videoRefs.current.values()
+    ) {
+      for (
+        const video
+        of videos
+      ) {
+        try {
+          video.pause();
+          video.srcObject = null;
+        } catch {}
+      }
+    }
+
+    videoRefs.current.clear();
+
+    setStreamVersion(
+      version =>
+        version + 1
+    );
+  }
+
+  /* =======================================================
+     CLEANUP ALL
+  ======================================================= */
+
+  function cleanupAll() {
+    cleanupStreams();
+
+    roomId.current =
+      "";
+
+    setSharing(false);
+    setProducers([]);
+    setSelectedProducer(
+      "local"
+    );
+    setViewerCount(0);
   }
 
   /* =======================================================
@@ -679,7 +2313,7 @@ function App() {
     }
 
     console.log(
-      "[WS] Conectando:",
+      "[WS] conectando:",
       SIGNALING_URL
     );
 
@@ -695,7 +2329,7 @@ function App() {
       socket.onopen =
         () => {
           console.log(
-            "[WS] Conectado"
+            "[WS] conectado"
           );
 
           setError("");
@@ -727,9 +2361,9 @@ function App() {
             msg
           );
 
-          /* ===============================================
-             ID
-          =============================================== */
+          /* ================================================
+             CLIENT ID
+          ================================================ */
 
           if (
             msg.type ===
@@ -748,9 +2382,9 @@ function App() {
             return;
           }
 
-          /* ===============================================
+          /* ================================================
              ROOM CREATED
-          =============================================== */
+          ================================================ */
 
           if (
             msg.type ===
@@ -766,17 +2400,9 @@ function App() {
             roomId.current =
               code;
 
-            setRoomCode(
-              code
-            );
-
-            setCurrentRoom(
-              code
-            );
-
-            setInRoom(
-              true
-            );
+            setRoomCode(code);
+            setCurrentRoom(code);
+            setInRoom(true);
 
             requestedOffers.current.clear();
 
@@ -795,9 +2421,9 @@ function App() {
             return;
           }
 
-          /* ===============================================
+          /* ================================================
              ROOM JOINED
-          =============================================== */
+          ================================================ */
 
           if (
             msg.type ===
@@ -813,17 +2439,9 @@ function App() {
             roomId.current =
               code;
 
-            setRoomCode(
-              code
-            );
-
-            setCurrentRoom(
-              code
-            );
-
-            setInRoom(
-              true
-            );
+            setRoomCode(code);
+            setCurrentRoom(code);
+            setInRoom(true);
 
             requestedOffers.current.clear();
 
@@ -842,9 +2460,9 @@ function App() {
             return;
           }
 
-          /* ===============================================
+          /* ================================================
              PRODUCER LIST
-          =============================================== */
+          ================================================ */
 
           if (
             msg.type ===
@@ -907,6 +2525,9 @@ function App() {
               }
             );
 
+            /*
+             * Pede offers para cada producer.
+             */
             for (
               const producerId
               of remote
@@ -919,9 +2540,9 @@ function App() {
             return;
           }
 
-          /* ===============================================
+          /* ================================================
              NEW PRODUCER
-          =============================================== */
+          ================================================ */
 
           if (
             msg.type ===
@@ -975,9 +2596,9 @@ function App() {
             return;
           }
 
-          /* ===============================================
+          /* ================================================
              PRODUCER LEFT
-          =============================================== */
+          ================================================ */
 
           if (
             msg.type ===
@@ -993,9 +2614,9 @@ function App() {
             return;
           }
 
-          /* ===============================================
+          /* ================================================
              VIEWER COUNT
-          =============================================== */
+          ================================================ */
 
           if (
             msg.type ===
@@ -1010,9 +2631,9 @@ function App() {
             return;
           }
 
-          /* ===============================================
-             ERROR
-          =============================================== */
+          /* ================================================
+             SERVER ERROR
+          ================================================ */
 
           if (
             msg.type ===
@@ -1031,31 +2652,35 @@ function App() {
             return;
           }
 
-          /* ===============================================
+          /* ================================================
              REQUEST OFFER
-          =============================================== */
+          ================================================ */
 
           if (
             msg.type ===
             "request-offer"
           ) {
+            const viewerId =
+              String(
+                msg.viewerId ||
+                ""
+              );
+
             if (
-              localStream.current
+              localStream.current &&
+              viewerId
             ) {
               await createProducerPeer(
-                String(
-                  msg.viewerId ||
-                  ""
-                )
+                viewerId
               );
             }
 
             return;
           }
 
-          /* ===============================================
+          /* ================================================
              OFFER
-          =============================================== */
+          ================================================ */
 
           if (
             msg.type ===
@@ -1068,9 +2693,9 @@ function App() {
             return;
           }
 
-          /* ===============================================
+          /* ================================================
              ANSWER
-          =============================================== */
+          ================================================ */
 
           if (
             msg.type ===
@@ -1083,9 +2708,9 @@ function App() {
             return;
           }
 
-          /* ===============================================
+          /* ================================================
              ICE
-          =============================================== */
+          ================================================ */
 
           if (
             msg.type ===
@@ -1114,7 +2739,7 @@ function App() {
       socket.onclose =
         () => {
           console.warn(
-            "[WS] Fechado"
+            "[WS] fechado"
           );
 
           setStatus(
@@ -1135,1751 +2760,7 @@ function App() {
   }
 
   /* =======================================================
-     SEND
-  ======================================================= */
-
-  function send(message) {
-    if (
-      !ws.current ||
-      ws.current.readyState !==
-        WebSocket.OPEN
-    ) {
-      console.warn(
-        "[SEND] WebSocket não conectado",
-        message
-      );
-
-      return false;
-    }
-
-    const payload = {
-      ...message
-    };
-
-    if (
-      !payload.roomId &&
-      roomId.current
-    ) {
-      payload.roomId =
-        roomId.current;
-    }
-
-    console.log(
-      "[SEND]",
-      payload
-    );
-
-    try {
-      ws.current.send(
-        JSON.stringify(
-          payload
-        )
-      );
-
-      return true;
-
-    } catch (error) {
-      console.error(
-        "[SEND]",
-        error
-      );
-
-      return false;
-    }
-  }
-
-  /* =======================================================
-     CREATE ROOM
-  ======================================================= */
-
-  function createRoom() {
-    setError("");
-
-    send({
-      type:
-        "create-room"
-    });
-  }
-
-  /* =======================================================
-     JOIN ROOM
-  ======================================================= */
-
-  function joinRoom() {
-    setError("");
-
-    const code =
-      roomInput
-        .trim()
-        .toUpperCase();
-
-    if (!code) {
-      setError(
-        "Digite o código da sala."
-      );
-
-      return;
-    }
-
-    send({
-      type:
-        "join-room",
-
-      roomId:
-        code
-    });
-  }
-
-  /* =======================================================
-     LEAVE
-  ======================================================= */
-
-  function leaveRoom() {
-    send({
-      type:
-        "leave-room"
-    });
-
-    cleanupStreams();
-
-    roomId.current =
-      "";
-
-    setRoomCode("");
-
-    setCurrentRoom("");
-
-    setInRoom(
-      false
-    );
-
-    setSharing(
-      false
-    );
-
-    setProducers([]);
-
-    setSelectedProducer(
-      "local"
-    );
-
-    setViewerCount(
-      0
-    );
-
-    setStatus(
-      "Servidor conectado"
-    );
-  }
-
-  /* =======================================================
-     START SHARING
-  ======================================================= */
-
-  async function startSharing() {
-    setError("");
-
-    if (!inRoom) {
-      setError(
-        "Entre em uma sala primeiro."
-      );
-
-      return;
-    }
-
-    if (sharing) {
-      return;
-    }
-
-    if (
-      producers.length >=
-      MAX_PRODUCERS
-    ) {
-      setError(
-        `A sala já possui ${MAX_PRODUCERS} transmissões ativas.`
-      );
-
-      return;
-    }
-
-    try {
-      console.log(
-        "[SCREEN] solicitando captura..."
-      );
-
-      const stream =
-        await navigator.mediaDevices
-          .getDisplayMedia({
-            video: {
-              frameRate: {
-                ideal: 30,
-                max: 60
-              },
-
-              width: {
-                ideal: 1920
-              },
-
-              height: {
-                ideal: 1080
-              }
-            },
-
-            audio: true
-          });
-
-      console.log(
-        "[SCREEN] captura iniciada",
-        stream
-      );
-
-      localStream.current =
-        stream;
-
-      streams.current.set(
-        "local",
-        stream
-      );
-
-      setAudioStates(
-        current => ({
-          ...current,
-          local: false
-        })
-      );
-
-      setSharing(
-        true
-      );
-
-      setSelectedProducer(
-        "local"
-      );
-
-      const sent =
-        send({
-          type:
-            "start-sharing"
-        });
-
-      if (!sent) {
-        stream
-          .getTracks()
-          .forEach(
-            track =>
-              track.stop()
-          );
-
-        localStream.current =
-          null;
-
-        streams.current.delete(
-          "local"
-        );
-
-        setSharing(
-          false
-        );
-
-        setError(
-          "Servidor de sinalização não está conectado."
-        );
-
-        return;
-      }
-
-      setStatus(
-        "Você está transmitindo"
-      );
-
-      const videoTrack =
-        stream.getVideoTracks()[0];
-
-      if (videoTrack) {
-        videoTrack.onended =
-          () => {
-            console.log(
-              "[SCREEN] captura encerrada"
-            );
-
-            stopSharing();
-          };
-      }
-
-      console.log(
-        "[SCREEN] vídeo:",
-        stream.getVideoTracks().length
-      );
-
-      console.log(
-        "[SCREEN] áudio:",
-        stream.getAudioTracks().length
-      );
-
-      attachStream(
-        "local",
-        stream
-      );
-
-    } catch (error) {
-      console.error(
-        "[SCREEN] erro:",
-        error
-      );
-
-      if (
-        error?.name ===
-        "NotAllowedError"
-      ) {
-        return;
-      }
-
-      setError(
-        "Não foi possível iniciar a captura."
-      );
-    }
-  }
-
-  /* =======================================================
-     STOP SHARING
-  ======================================================= */
-
-  function stopSharing() {
-    if (
-      !localStream.current &&
-      !sharing
-    ) {
-      return;
-    }
-
-    console.log(
-      "[SCREEN] parando..."
-    );
-
-    if (
-      ws.current &&
-      ws.current.readyState ===
-        WebSocket.OPEN &&
-      roomId.current
-    ) {
-      send({
-        type:
-          "stop-sharing"
-      });
-    }
-
-    for (
-      const [
-        key,
-        pc
-      ]
-      of peerConnections.current
-    ) {
-      if (
-        key.startsWith(
-          "local->"
-        )
-      ) {
-        try {
-          pc.close();
-        } catch {}
-
-        peerConnections.current.delete(
-          key
-        );
-
-        pendingCandidates.current.delete(
-          key
-        );
-      }
-    }
-
-    if (
-      localStream.current
-    ) {
-      localStream.current
-        .getTracks()
-        .forEach(
-          track => {
-            try {
-              track.stop();
-            } catch {}
-          }
-        );
-    }
-
-    localStream.current =
-      null;
-
-    streams.current.delete(
-      "local"
-    );
-
-    clearVideo(
-      "local"
-    );
-
-    setSharing(
-      false
-    );
-
-    setAudioStates(
-      current => {
-        const next = {
-          ...current
-        };
-
-        delete next.local;
-
-        return next;
-      }
-    );
-
-    setSelectedProducer(
-      current => {
-        if (
-          current ===
-          "local"
-        ) {
-          return (
-            producers[0] ||
-            "local"
-          );
-        }
-
-        return current;
-      }
-    );
-
-    setStatus(
-      "Servidor conectado"
-    );
-  }
-
-  /* =======================================================
-     REQUEST OFFER
-  ======================================================= */
-
-  function requestOffer(
-    producerId
-  ) {
-    if (!producerId) {
-      return;
-    }
-
-    if (
-      producerId ===
-      myId.current
-    ) {
-      return;
-    }
-
-    if (
-      requestedOffers.current.has(
-        producerId
-      )
-    ) {
-      return;
-    }
-
-    requestedOffers.current.add(
-      producerId
-    );
-
-    console.log(
-      "[VIEWER] pedindo offer:",
-      producerId
-    );
-
-    send({
-      type:
-        "request-offer",
-
-      producerId
-    });
-  }
-
-  /* =======================================================
-     CREATE PRODUCER PEER
-  ======================================================= */
-
-  async function createProducerPeer(
-    viewerId
-  ) {
-    if (
-      !viewerId ||
-      !localStream.current
-    ) {
-      return;
-    }
-
-    const key =
-      `local->${viewerId}`;
-
-    const old =
-      peerConnections.current.get(
-        key
-      );
-
-    if (old) {
-      if (
-        old.signalingState !==
-        "closed"
-      ) {
-        console.log(
-          "[PRODUCER] peer já existe:",
-          key
-        );
-
-        return;
-      }
-
-      peerConnections.current.delete(
-        key
-      );
-    }
-
-    console.log(
-      "[PRODUCER] criando peer:",
-      key
-    );
-
-    const iceServers =
-      await getIceServers();
-
-    const pc =
-      new RTCPeerConnection({
-        iceServers,
-
-        iceCandidatePoolSize: 10
-      });
-
-    peerConnections.current.set(
-      key,
-      pc
-    );
-
-    pendingCandidates.current.set(
-      key,
-      []
-    );
-
-    /* ===============================================
-       DIAGNÓSTICO ICE
-    =============================================== */
-
-    pc.onicegatheringstatechange =
-      () => {
-        console.log(
-          "[PRODUCER] ICE gathering:",
-          viewerId,
-          pc.iceGatheringState
-        );
-      };
-
-    pc.oniceconnectionstatechange =
-      () => {
-        console.log(
-          "[PRODUCER] ICE connection:",
-          viewerId,
-          pc.iceConnectionState
-        );
-      };
-
-    pc.onsignalingstatechange =
-      () => {
-        console.log(
-          "[PRODUCER] signaling:",
-          viewerId,
-          pc.signalingState
-        );
-      };
-
-    pc.onconnectionstatechange =
-      () => {
-        console.log(
-          "[PRODUCER]",
-          viewerId,
-          "connection:",
-          pc.connectionState
-        );
-
-        if (
-          pc.connectionState ===
-          "connected"
-        ) {
-          console.log(
-            "[PRODUCER] CONECTADO COM:",
-            viewerId
-          );
-
-          setStatus(
-            "Transmissão conectada"
-          );
-        }
-
-        if (
-          pc.connectionState ===
-            "failed" ||
-          pc.connectionState ===
-            "closed"
-        ) {
-          console.error(
-            "[PRODUCER] conexão falhou:",
-            viewerId,
-            {
-              connectionState:
-                pc.connectionState,
-
-              iceConnectionState:
-                pc.iceConnectionState,
-
-              iceGatheringState:
-                pc.iceGatheringState
-            }
-          );
-
-          peerConnections.current.delete(
-            key
-          );
-
-          pendingCandidates.current.delete(
-            key
-          );
-        }
-      };
-
-    /* ===============================================
-       TRACKS
-    =============================================== */
-
-    for (
-      const track
-      of localStream.current.getTracks()
-    ) {
-      console.log(
-        "[PRODUCER] addTrack:",
-        track.kind,
-        track.readyState
-      );
-
-      pc.addTrack(
-        track,
-        localStream.current
-      );
-    }
-
-    /* ===============================================
-       ICE
-    =============================================== */
-
-    pc.onicecandidate =
-      event => {
-        if (!event.candidate) {
-          console.log(
-            "[PRODUCER] ICE gathering finalizado:",
-            viewerId
-          );
-
-          return;
-        }
-
-        const candidate =
-          event.candidate.toJSON
-            ? event.candidate.toJSON()
-            : event.candidate;
-
-        console.log(
-          "[PRODUCER] enviando ICE:",
-          viewerId,
-          candidate
-        );
-
-        send({
-          type:
-            "ice",
-
-          target:
-            viewerId,
-
-          producerId:
-            myId.current,
-
-          candidate
-        });
-      };
-
-    /* ===============================================
-       OFFER
-    =============================================== */
-
-    try {
-      console.log(
-        "[PRODUCER] criando offer:",
-        viewerId
-      );
-
-      const offer =
-        await pc.createOffer();
-
-      console.log(
-        "[PRODUCER] offer criada:",
-        viewerId
-      );
-
-      await pc.setLocalDescription(
-        offer
-      );
-
-      console.log(
-        "[PRODUCER] localDescription:",
-        viewerId,
-        pc.localDescription
-      );
-
-      const sent =
-        send({
-          type:
-            "offer",
-
-          target:
-            viewerId,
-
-          producerId:
-            myId.current,
-
-          offer:
-            pc.localDescription
-        });
-
-      if (!sent) {
-        throw new Error(
-          "Não foi possível enviar offer."
-        );
-      }
-
-      console.log(
-        "[PRODUCER] offer enviada:",
-        viewerId
-      );
-
-    } catch (error) {
-      console.error(
-        "[PRODUCER] erro offer:",
-        viewerId,
-        error
-      );
-
-      try {
-        pc.close();
-      } catch {}
-
-      peerConnections.current.delete(
-        key
-      );
-
-      pendingCandidates.current.delete(
-        key
-      );
-    }
-  }
-
-  /* =======================================================
-     HANDLE OFFER
-  ======================================================= */
-
-  async function handleOffer(
-    msg
-  ) {
-    const producerId =
-      String(
-        msg.producerId ||
-        msg.from ||
-        ""
-      );
-
-    const producerFrom =
-      String(
-        msg.from ||
-        ""
-      );
-
-    if (
-      !producerId ||
-      !producerFrom
-    ) {
-      console.warn(
-        "[VIEWER] offer inválida:",
-        msg
-      );
-
-      return;
-    }
-
-    const key =
-      `${producerId}->local`;
-
-    console.log(
-      "[VIEWER] offer recebida:",
-      producerId
-    );
-
-    const old =
-      peerConnections.current.get(
-        key
-      );
-
-    if (old) {
-      if (
-        old.signalingState !==
-        "closed"
-      ) {
-        console.log(
-          "[VIEWER] peer já existe:",
-          key
-        );
-
-        return;
-      }
-
-      peerConnections.current.delete(
-        key
-      );
-    }
-
-    const iceServers =
-      await getIceServers();
-
-    const pc =
-      new RTCPeerConnection({
-        iceServers,
-
-        iceCandidatePoolSize: 10
-      });
-
-    peerConnections.current.set(
-      key,
-      pc
-    );
-
-    pendingCandidates.current.set(
-      key,
-      []
-    );
-
-    /* ===============================================
-       DIAGNÓSTICO
-    =============================================== */
-
-    pc.onicegatheringstatechange =
-      () => {
-        console.log(
-          "[VIEWER] ICE gathering:",
-          producerId,
-          pc.iceGatheringState
-        );
-      };
-
-    pc.oniceconnectionstatechange =
-      () => {
-        console.log(
-          "[VIEWER] ICE connection:",
-          producerId,
-          pc.iceConnectionState
-        );
-      };
-
-    pc.onsignalingstatechange =
-      () => {
-        console.log(
-          "[VIEWER] signaling:",
-          producerId,
-          pc.signalingState
-        );
-      };
-
-    /* ===============================================
-       TRACK
-    =============================================== */
-
-    pc.ontrack =
-      event => {
-        console.log(
-          "[VIEWER] TRACK:",
-          producerId,
-          event.track.kind,
-          event.track.readyState
-        );
-
-        let stream =
-          event.streams?.[0];
-
-        if (!stream) {
-          stream =
-            streams.current.get(
-              producerId
-            );
-
-          if (!stream) {
-            stream =
-              new MediaStream();
-
-            streams.current.set(
-              producerId,
-              stream
-            );
-          }
-
-          const exists =
-            stream
-              .getTracks()
-              .some(
-                track =>
-                  track.id ===
-                  event.track.id
-              );
-
-          if (!exists) {
-            stream.addTrack(
-              event.track
-            );
-          }
-        }
-
-        streams.current.set(
-          producerId,
-          stream
-        );
-
-        console.log(
-          "[VIEWER] stream recebida:",
-          producerId,
-          stream
-            .getTracks()
-            .map(
-              track =>
-                `${track.kind}:${track.readyState}`
-            )
-        );
-
-        setStreamVersion(
-          version =>
-            version + 1
-        );
-
-        attachStream(
-          producerId,
-          stream
-        );
-
-        setProducers(
-          current => {
-            if (
-              current.includes(
-                producerId
-              )
-            ) {
-              return current;
-            }
-
-            return [
-              ...current,
-              producerId
-            ].slice(
-              0,
-              MAX_PRODUCERS
-            );
-          }
-        );
-      };
-
-    /* ===============================================
-       ICE
-    =============================================== */
-
-    pc.onicecandidate =
-      event => {
-        if (!event.candidate) {
-          console.log(
-            "[VIEWER] ICE gathering finalizado:",
-            producerId
-          );
-
-          return;
-        }
-
-        const candidate =
-          event.candidate.toJSON
-            ? event.candidate.toJSON()
-            : event.candidate;
-
-        console.log(
-          "[VIEWER] enviando ICE:",
-          producerId,
-          candidate
-        );
-
-        send({
-          type:
-            "ice",
-
-          target:
-            producerFrom,
-
-          producerId,
-
-          candidate
-        });
-      };
-
-    /* ===============================================
-       CONNECTION
-    =============================================== */
-
-    pc.onconnectionstatechange =
-      () => {
-        console.log(
-          "[VIEWER]",
-          producerId,
-          "connection:",
-          pc.connectionState
-        );
-
-        if (
-          pc.connectionState ===
-          "connected"
-        ) {
-          console.log(
-            "[VIEWER] CONECTADO:",
-            producerId
-          );
-
-          setStatus(
-            "Transmissão conectada"
-          );
-
-          const stream =
-            streams.current.get(
-              producerId
-            );
-
-          if (stream) {
-            attachStream(
-              producerId,
-              stream
-            );
-          }
-        }
-
-        if (
-          pc.connectionState ===
-            "failed" ||
-          pc.connectionState ===
-            "closed"
-        ) {
-          console.error(
-            "[VIEWER] conexão falhou:",
-            producerId,
-            {
-              connectionState:
-                pc.connectionState,
-
-              iceConnectionState:
-                pc.iceConnectionState,
-
-              iceGatheringState:
-                pc.iceGatheringState
-            }
-          );
-        }
-      };
-
-    /* ===============================================
-       OFFER -> ANSWER
-    =============================================== */
-
-    try {
-      console.log(
-        "[VIEWER] configurando remoteDescription:",
-        producerId
-      );
-
-      await pc.setRemoteDescription(
-        msg.offer
-      );
-
-      console.log(
-        "[VIEWER] remoteDescription OK:",
-        producerId
-      );
-
-      /*
-       * ICE recebido antes da offer
-       * agora pode ser processado.
-       */
-      await flushPendingCandidates(
-        key
-      );
-
-      console.log(
-        "[VIEWER] criando answer:",
-        producerId
-      );
-
-      const answer =
-        await pc.createAnswer();
-
-      await pc.setLocalDescription(
-        answer
-      );
-
-      console.log(
-        "[VIEWER] answer criada:",
-        producerId
-      );
-
-      const sent =
-        send({
-          type:
-            "answer",
-
-          target:
-            producerFrom,
-
-          producerId,
-
-          answer:
-            pc.localDescription
-        });
-
-      if (!sent) {
-        throw new Error(
-          "Não foi possível enviar answer."
-        );
-      }
-
-      console.log(
-        "[VIEWER] answer enviada:",
-        producerId
-      );
-
-    } catch (error) {
-      console.error(
-        "[VIEWER] erro offer:",
-        producerId,
-        error
-      );
-
-      try {
-        pc.close();
-      } catch {}
-
-      peerConnections.current.delete(
-        key
-      );
-
-      pendingCandidates.current.delete(
-        key
-      );
-    }
-  }
-
-  /* =======================================================
-     HANDLE ANSWER
-  ======================================================= */
-
-  async function handleAnswer(
-    msg
-  ) {
-    const viewerId =
-      String(
-        msg.from ||
-        ""
-      );
-
-    if (!viewerId) {
-      return;
-    }
-
-    const key =
-      `local->${viewerId}`;
-
-    const pc =
-      peerConnections.current.get(
-        key
-      );
-
-    if (!pc) {
-      console.warn(
-        "[PRODUCER] peer não encontrado:",
-        key
-      );
-
-      return;
-    }
-
-    try {
-      console.log(
-        "[PRODUCER] answer recebida:",
-        viewerId
-      );
-
-      if (
-        pc.signalingState !==
-        "have-local-offer"
-      ) {
-        console.warn(
-          "[PRODUCER] estado inesperado:",
-          pc.signalingState
-        );
-
-        return;
-      }
-
-      await pc.setRemoteDescription(
-        msg.answer
-      );
-
-      console.log(
-        "[PRODUCER] remoteDescription OK:",
-        viewerId
-      );
-
-      await flushPendingCandidates(
-        key
-      );
-
-    } catch (error) {
-      console.error(
-        "[PRODUCER] erro answer:",
-        viewerId,
-        error
-      );
-    }
-  }
-
-  /* =======================================================
-     ICE
-  ======================================================= */
-
-  async function handleIce(
-    msg
-  ) {
-    if (!msg.candidate) {
-      return;
-    }
-
-    const producerId =
-      String(
-        msg.producerId ||
-        ""
-      );
-
-    const from =
-      String(
-        msg.from ||
-        ""
-      );
-
-    if (
-      !producerId ||
-      !from
-    ) {
-      console.warn(
-        "[ICE] mensagem incompleta:",
-        msg
-      );
-
-      return;
-    }
-
-    let key;
-
-    /*
-     * Se o producer sou eu:
-     *
-     * local -> viewer
-     */
-    if (
-      producerId ===
-      myId.current
-    ) {
-      key =
-        `local->${from}`;
-
-    } else {
-
-      /*
-       * viewer:
-       *
-       * producer -> local
-       */
-      key =
-        `${producerId}->local`;
-    }
-
-    let pc =
-      peerConnections.current.get(
-        key
-      );
-
-    /*
-     * Peer ainda não existe.
-     */
-    if (!pc) {
-      console.log(
-        "[ICE] peer ainda não existe, enfileirando:",
-        key
-      );
-
-      if (
-        !pendingCandidates.current.has(
-          key
-        )
-      ) {
-        pendingCandidates.current.set(
-          key,
-          []
-        );
-      }
-
-      pendingCandidates.current
-        .get(key)
-        .push(
-          msg.candidate
-        );
-
-      return;
-    }
-
-    /*
-     * Remote description ainda não
-     * existe.
-     */
-    if (
-      !pc.remoteDescription
-    ) {
-      console.log(
-        "[ICE] remoteDescription ainda não existe, enfileirando:",
-        key
-      );
-
-      if (
-        !pendingCandidates.current.has(
-          key
-        )
-      ) {
-        pendingCandidates.current.set(
-          key,
-          []
-        );
-      }
-
-      pendingCandidates.current
-        .get(key)
-        .push(
-          msg.candidate
-        );
-
-      return;
-    }
-
-    try {
-      await pc.addIceCandidate(
-        msg.candidate
-      );
-
-      console.log(
-        "[ICE] candidato adicionado:",
-        key
-      );
-
-    } catch (error) {
-      console.warn(
-        "[ICE] erro ao adicionar:",
-        key,
-        error
-      );
-
-      /*
-       * Se a descrição sumiu durante
-       * a corrida assíncrona, guarda
-       * novamente.
-       */
-      if (
-        !pc.remoteDescription
-      ) {
-        if (
-          !pendingCandidates.current.has(
-            key
-          )
-        ) {
-          pendingCandidates.current.set(
-            key,
-            []
-          );
-        }
-
-        pendingCandidates.current
-          .get(key)
-          .push(
-            msg.candidate
-          );
-      }
-    }
-  }
-
-  /* =======================================================
-     FLUSH ICE
-  ======================================================= */
-
-  async function flushPendingCandidates(
-    key
-  ) {
-    const pc =
-      peerConnections.current.get(
-        key
-      );
-
-    if (!pc) {
-      return;
-    }
-
-    if (
-      !pc.remoteDescription
-    ) {
-      console.log(
-        "[ICE] flush cancelado:",
-        key
-      );
-
-      return;
-    }
-
-    const list =
-      pendingCandidates.current.get(
-        key
-      );
-
-    if (
-      !list ||
-      list.length === 0
-    ) {
-      return;
-    }
-
-    pendingCandidates.current.delete(
-      key
-    );
-
-    console.log(
-      `[ICE] processando ${list.length} candidatos:`,
-      key
-    );
-
-    for (
-      const candidate
-      of list
-    ) {
-      try {
-        await pc.addIceCandidate(
-          candidate
-        );
-
-        console.log(
-          "[ICE] candidato pendente OK:",
-          key
-        );
-
-      } catch (error) {
-        console.warn(
-          "[ICE] candidato pendente falhou:",
-          key,
-          error
-        );
-      }
-    }
-  }
-
-  /* =======================================================
-     REMOVE REMOTE
-  ======================================================= */
-
-  function removeRemoteProducer(
-    producerId
-  ) {
-    if (!producerId) {
-      return;
-    }
-
-    console.log(
-      "[REMOVE PRODUCER]",
-      producerId
-    );
-
-    requestedOffers.current.delete(
-      producerId
-    );
-
-    const key =
-      `${producerId}->local`;
-
-    const pc =
-      peerConnections.current.get(
-        key
-      );
-
-    if (pc) {
-      try {
-        pc.close();
-      } catch {}
-
-      peerConnections.current.delete(
-        key
-      );
-    }
-
-    pendingCandidates.current.delete(
-      key
-    );
-
-    clearVideo(
-      producerId
-    );
-
-    streams.current.delete(
-      producerId
-    );
-
-    videoRefs.current.delete(
-      producerId
-    );
-
-    setProducers(
-      current =>
-        current.filter(
-          id =>
-            id !==
-            producerId
-        )
-    );
-
-    setAudioStates(
-      current => {
-        const next = {
-          ...current
-        };
-
-        delete next[
-          producerId
-        ];
-
-        return next;
-      }
-    );
-
-    setSelectedProducer(
-      current => {
-        if (
-          current !==
-          producerId
-        ) {
-          return current;
-        }
-
-        return "local";
-      }
-    );
-
-    setStreamVersion(
-      version =>
-        version + 1
-    );
-  }
-
-  /* =======================================================
-     AUDIO
-  ======================================================= */
-
-  function toggleAudio(
-    producerId
-  ) {
-    const next =
-      !(
-        audioStates[
-          producerId
-        ] ?? false
-      );
-
-    setAudioStates(
-      current => ({
-        ...current,
-        [producerId]:
-          next
-      })
-    );
-
-    const videos =
-      videoRefs.current.get(
-        producerId
-      );
-
-    if (!videos) {
-      return;
-    }
-
-    for (
-      const video
-      of videos
-    ) {
-      video.muted =
-        !next;
-
-      video.volume =
-        1;
-
-      if (next) {
-        video
-          .play()
-          .catch(
-            () => {}
-          );
-      }
-    }
-  }
-
-  /* =======================================================
-     SELECT
-  ======================================================= */
-
-  function selectProducer(
-    producerId
-  ) {
-    setSelectedProducer(
-      producerId
-    );
-
-    setTimeout(
-      () => {
-        const stream =
-          streams.current.get(
-            producerId
-          );
-
-        if (!stream) {
-          return;
-        }
-
-        attachStream(
-          producerId,
-          stream
-        );
-      },
-      0
-    );
-  }
-
-  /* =======================================================
-     CLEANUP
-  ======================================================= */
-
-  function cleanupStreams() {
-    if (
-      localStream.current
-    ) {
-      localStream.current
-        .getTracks()
-        .forEach(
-          track => {
-            try {
-              track.stop();
-            } catch {}
-          }
-        );
-    }
-
-    localStream.current =
-      null;
-
-    for (
-      const stream
-      of streams.current.values()
-    ) {
-      stream
-        .getTracks()
-        .forEach(
-          track => {
-            try {
-              track.stop();
-            } catch {}
-          }
-        );
-    }
-
-    streams.current.clear();
-
-    for (
-      const pc
-      of peerConnections.current.values()
-    ) {
-      try {
-        pc.close();
-      } catch {}
-    }
-
-    peerConnections.current.clear();
-
-    pendingCandidates.current.clear();
-
-    requestedOffers.current.clear();
-
-    for (
-      const videos
-      of videoRefs.current.values()
-    ) {
-      for (
-        const video
-        of videos
-      ) {
-        try {
-          video.pause();
-          video.srcObject =
-            null;
-        } catch {}
-      }
-    }
-
-    videoRefs.current.clear();
-
-    setStreamVersion(
-      version =>
-        version + 1
-    );
-  }
-
-  function cleanupAll() {
-    cleanupStreams();
-
-    roomId.current =
-      "";
-
-    setSharing(
-      false
-    );
-
-    setProducers([]);
-
-    setSelectedProducer(
-      "local"
-    );
-
-    setViewerCount(
-      0
-    );
-  }
-
-  /* =======================================================
-     DERIVADOS
+     DERIVED
   ======================================================= */
 
   const displayProducers =
@@ -2887,6 +2768,7 @@ function App() {
       ...(sharing
         ? ["local"]
         : []),
+
       ...producers
     ].slice(
       0,
@@ -3315,6 +3197,7 @@ function App() {
                         </div>
 
                       </button>
+
                     );
                   }
                 )}
