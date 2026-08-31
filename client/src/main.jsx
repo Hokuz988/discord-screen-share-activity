@@ -8,20 +8,30 @@ import {
   createRoot
 } from "react-dom/client";
 
+import {
+  DiscordSDK
+} from "@discord/embedded-app-sdk";
+
 import "./style.css";
 
 /* =========================================================
    CONFIG
 ========================================================= */
 
+const CLIENT_ID =
+  import.meta.env.VITE_DISCORD_CLIENT_ID || "";
+
 const SIGNALING_URL =
   import.meta.env.VITE_SIGNALING_URL ||
   "wss://screen-share-activity.onrender.com";
 
 const TURN_SERVER_URL =
+  import.meta.env.VITE_TURN_SERVER_URL ||
   "https://screen-share-activity.onrender.com";
 
 const MAX_PRODUCERS = 3;
+
+let discordSdk = null;
 
 /* =========================================================
    TURN
@@ -43,8 +53,7 @@ async function getIceServers() {
       );
     }
 
-    const data =
-      await response.json();
+    const data = await response.json();
 
     if (
       !data ||
@@ -54,6 +63,11 @@ async function getIceServers() {
         "Resposta TURN inválida."
       );
     }
+
+    console.log(
+      "[TURN] Servidores recebidos:",
+      data.iceServers
+    );
 
     return data.iceServers;
 
@@ -79,60 +93,42 @@ async function getIceServers() {
 ========================================================= */
 
 function App() {
-  const [
-    status,
-    setStatus
-  ] = useState("Conectando...");
 
-  const [
-    sharing,
-    setSharing
-  ] = useState(false);
+  const [discordReady, setDiscordReady] =
+    useState(false);
 
-  const [
-    roomCode,
-    setRoomCode
-  ] = useState("");
+  const [status, setStatus] =
+    useState("Iniciando...");
 
-  const [
-    roomInput,
-    setRoomInput
-  ] = useState("");
+  const [sharing, setSharing] =
+    useState(false);
 
-  const [
-    currentRoom,
-    setCurrentRoom
-  ] = useState("");
+  const [roomCode, setRoomCode] =
+    useState("");
 
-  const [
-    inRoom,
-    setInRoom
-  ] = useState(false);
+  const [roomInput, setRoomInput] =
+    useState("");
 
-  const [
-    error,
-    setError
-  ] = useState("");
+  const [currentRoom, setCurrentRoom] =
+    useState("");
 
-  const [
-    viewerCount,
-    setViewerCount
-  ] = useState(0);
+  const [inRoom, setInRoom] =
+    useState(false);
 
-  const [
-    producers,
-    setProducers
-  ] = useState([]);
+  const [error, setError] =
+    useState("");
 
-  const [
-    selectedProducer,
-    setSelectedProducer
-  ] = useState("local");
+  const [viewerCount, setViewerCount] =
+    useState(0);
 
-  const [
-    audioStates,
-    setAudioStates
-  ] = useState({});
+  const [producers, setProducers] =
+    useState([]);
+
+  const [selectedProducer, setSelectedProducer] =
+    useState("local");
+
+  const [audioStates, setAudioStates] =
+    useState({});
 
   /* =======================================================
      REFS
@@ -228,37 +224,34 @@ function App() {
         stream;
     }
 
-    const tryPlay = () => {
-      if (
-        element.srcObject !==
-        stream
-      ) {
-        return;
-      }
+    element
+      .play()
+      .catch(() => {});
+  }
 
-      element.play()
-        .catch(error => {
-          if (
-            error?.name !==
-              "AbortError" &&
-            error?.name !==
-              "NotAllowedError"
-          ) {
-            console.warn(
-              "[VIDEO] play:",
-              error
-            );
-          }
-        });
-    };
+  function unregisterVideo(
+    producerId,
+    element
+  ) {
+    if (!element) {
+      return;
+    }
 
-    if (
-      element.readyState >= 2
-    ) {
-      tryPlay();
-    } else {
-      element.onloadedmetadata =
-        tryPlay;
+    const set =
+      videoRefs.current.get(
+        producerId
+      );
+
+    if (!set) {
+      return;
+    }
+
+    set.delete(element);
+
+    if (set.size === 0) {
+      videoRefs.current.delete(
+        producerId
+      );
     }
   }
 
@@ -269,6 +262,17 @@ function App() {
     if (!stream) {
       return;
     }
+
+    console.log(
+      "[VIDEO] attachStream:",
+      producerId,
+      stream
+        .getTracks()
+        .map(
+          track =>
+            `${track.kind}:${track.readyState}`
+        )
+    );
 
     streams.current.set(
       producerId,
@@ -309,7 +313,8 @@ function App() {
 
       video.volume = 1;
 
-      video.play()
+      video
+        .play()
         .catch(() => {});
     }
   }
@@ -339,13 +344,98 @@ function App() {
   }
 
   /* =======================================================
-     WEBSOCKET
+     DISCORD
   ======================================================= */
 
   useEffect(() => {
-    connectSignal();
+    let alive = true;
+
+    async function setup() {
+
+      console.log(
+        "[APP] iniciando..."
+      );
+
+      console.log(
+        "[APP] CLIENT_ID:",
+        CLIENT_ID
+          ? "configurado"
+          : "não configurado"
+      );
+
+      console.log(
+        "[APP] SIGNALING:",
+        SIGNALING_URL
+      );
+
+      /*
+       * Primeiro conecta ao servidor.
+       * Isso também permite testar pelo navegador.
+       */
+
+      connectSignal();
+
+      if (!CLIENT_ID) {
+        console.warn(
+          "[DISCORD] CLIENT_ID não configurado."
+        );
+
+        setStatus(
+          "Modo navegador"
+        );
+
+        return;
+      }
+
+      try {
+
+        console.log(
+          "[DISCORD] criando SDK..."
+        );
+
+        discordSdk =
+          new DiscordSDK(
+            CLIENT_ID
+          );
+
+        await discordSdk.ready();
+
+        if (!alive) {
+          return;
+        }
+
+        console.log(
+          "[DISCORD] SDK pronto"
+        );
+
+        setDiscordReady(true);
+
+        setStatus(
+          "Conectado ao Discord"
+        );
+
+      } catch (error) {
+
+        console.error(
+          "[DISCORD] erro:",
+          error
+        );
+
+        if (!alive) {
+          return;
+        }
+
+        setStatus(
+          "Modo navegador"
+        );
+      }
+    }
+
+    setup();
 
     return () => {
+      alive = false;
+
       cleanupAll();
 
       if (ws.current) {
@@ -354,9 +444,15 @@ function App() {
         } catch {}
       }
     };
+
   }, []);
 
+  /* =======================================================
+     WEBSOCKET
+  ======================================================= */
+
   function connectSignal() {
+
     if (
       ws.current &&
       (
@@ -369,7 +465,13 @@ function App() {
       return;
     }
 
+    console.log(
+      "[WS] Conectando:",
+      SIGNALING_URL
+    );
+
     try {
+
       const socket =
         new WebSocket(
           SIGNALING_URL
@@ -379,6 +481,11 @@ function App() {
         socket;
 
       socket.onopen = () => {
+
+        console.log(
+          "[WS] CONECTADO"
+        );
+
         setError("");
 
         setStatus(
@@ -388,6 +495,7 @@ function App() {
 
       socket.onmessage =
         async event => {
+
           let msg;
 
           try {
@@ -396,8 +504,18 @@ function App() {
                 event.data
               );
           } catch {
+            console.error(
+              "[WS] JSON inválido:",
+              event.data
+            );
+
             return;
           }
+
+          console.log(
+            "[SERVER]",
+            msg
+          );
 
           /* =================================================
              CLIENT ID
@@ -407,10 +525,16 @@ function App() {
             msg.type ===
             "client-id"
           ) {
+
             myId.current =
               String(
                 msg.id || ""
               );
+
+            console.log(
+              "[CLIENT ID]",
+              myId.current
+            );
 
             return;
           }
@@ -423,6 +547,7 @@ function App() {
             msg.type ===
             "room-created"
           ) {
+
             const code =
               String(
                 msg.roomId || ""
@@ -462,6 +587,7 @@ function App() {
             msg.type ===
             "room-joined"
           ) {
+
             const code =
               String(
                 msg.roomId || ""
@@ -501,6 +627,7 @@ function App() {
             msg.type ===
             "producer-list"
           ) {
+
             const list =
               Array.isArray(
                 msg.producers
@@ -525,8 +652,38 @@ function App() {
                   MAX_PRODUCERS
                 );
 
+            console.log(
+              "[PRODUCERS]",
+              remote
+            );
+
             setProducers(
               remote
+            );
+
+            setSelectedProducer(
+              current => {
+
+                if (
+                  current ===
+                  "local"
+                ) {
+                  return current;
+                }
+
+                if (
+                  remote.includes(
+                    current
+                  )
+                ) {
+                  return current;
+                }
+
+                return (
+                  remote[0] ||
+                  "local"
+                );
+              }
             );
 
             for (
@@ -549,21 +706,26 @@ function App() {
             msg.type ===
             "producer"
           ) {
+
             const producerId =
               String(
                 msg.producerId || ""
               );
 
+            if (!producerId) {
+              return;
+            }
+
             if (
-              !producerId ||
               producerId ===
-                myId.current
+              myId.current
             ) {
               return;
             }
 
             setProducers(
               current => {
+
                 if (
                   current.includes(
                     producerId
@@ -601,6 +763,7 @@ function App() {
             msg.type ===
             "producer-left"
           ) {
+
             removeRemoteProducer(
               String(
                 msg.producerId || ""
@@ -618,6 +781,7 @@ function App() {
             msg.type ===
             "viewer-count"
           ) {
+
             setViewerCount(
               Number(
                 msg.count || 0
@@ -635,6 +799,12 @@ function App() {
             msg.type ===
             "error"
           ) {
+
+            console.error(
+              "[SERVER ERROR]",
+              msg.message
+            );
+
             setError(
               msg.message ||
               "Erro no servidor."
@@ -651,9 +821,16 @@ function App() {
             msg.type ===
             "request-offer"
           ) {
+
+            console.log(
+              "[PRODUCER] request-offer:",
+              msg.viewerId
+            );
+
             if (
               localStream.current
             ) {
+
               await createProducerPeer(
                 String(
                   msg.viewerId || ""
@@ -672,6 +849,7 @@ function App() {
             msg.type ===
             "offer"
           ) {
+
             await handleOffer(
               msg
             );
@@ -687,6 +865,7 @@ function App() {
             msg.type ===
             "answer"
           ) {
+
             await handleAnswer(
               msg
             );
@@ -702,6 +881,7 @@ function App() {
             msg.type ===
             "ice"
           ) {
+
             await handleIce(
               msg
             );
@@ -711,20 +891,39 @@ function App() {
         };
 
       socket.onerror =
-        () => {
+        error => {
+
+          console.error(
+            "[WS ERROR]",
+            error
+          );
+
           setError(
             "Erro de conexão com o servidor."
           );
         };
 
       socket.onclose =
-        () => {
+        event => {
+
+          console.warn(
+            "[WS] Fechado:",
+            event.code,
+            event.reason
+          );
+
           setStatus(
             "Servidor desconectado"
           );
         };
 
-    } catch {
+    } catch (error) {
+
+      console.error(
+        "[WS] erro:",
+        error
+      );
+
       setError(
         "WebSocket indisponível."
       );
@@ -736,11 +935,18 @@ function App() {
   ======================================================= */
 
   function send(message) {
+
     if (
       !ws.current ||
       ws.current.readyState !==
         WebSocket.OPEN
     ) {
+
+      console.warn(
+        "[SEND] WebSocket não conectado:",
+        message
+      );
+
       return false;
     }
 
@@ -756,6 +962,11 @@ function App() {
         roomId.current;
     }
 
+    console.log(
+      "[SEND]",
+      payload
+    );
+
     ws.current.send(
       JSON.stringify(
         payload
@@ -766,11 +977,31 @@ function App() {
   }
 
   /* =======================================================
-     ROOM
+     CREATE ROOM
   ======================================================= */
 
   function createRoom() {
+
     setError("");
+
+    console.log(
+      "[ROOM] criando sala..."
+    );
+
+    if (
+      !ws.current ||
+      ws.current.readyState !==
+        WebSocket.OPEN
+    ) {
+
+      setError(
+        "Aguardando conexão com o servidor..."
+      );
+
+      connectSignal();
+
+      return;
+    }
 
     send({
       type:
@@ -778,7 +1009,12 @@ function App() {
     });
   }
 
+  /* =======================================================
+     JOIN ROOM
+  ======================================================= */
+
   function joinRoom() {
+
     setError("");
 
     const code =
@@ -787,12 +1023,33 @@ function App() {
         .toUpperCase();
 
     if (!code) {
+
       setError(
         "Digite o código da sala."
       );
 
       return;
     }
+
+    if (
+      !ws.current ||
+      ws.current.readyState !==
+        WebSocket.OPEN
+    ) {
+
+      setError(
+        "Aguardando conexão com o servidor..."
+      );
+
+      connectSignal();
+
+      return;
+    }
+
+    console.log(
+      "[ROOM] entrando:",
+      code
+    );
 
     send({
       type:
@@ -803,7 +1060,12 @@ function App() {
     });
   }
 
+  /* =======================================================
+     LEAVE
+  ======================================================= */
+
   function leaveRoom() {
+
     send({
       type:
         "leave-room"
@@ -834,9 +1096,11 @@ function App() {
   ======================================================= */
 
   async function startSharing() {
+
     setError("");
 
     if (!inRoom) {
+
       setError(
         "Entre em uma sala primeiro."
       );
@@ -852,6 +1116,7 @@ function App() {
       producers.length >=
       MAX_PRODUCERS
     ) {
+
       setError(
         `A sala já possui ${MAX_PRODUCERS} transmissões ativas.`
       );
@@ -859,7 +1124,24 @@ function App() {
       return;
     }
 
+    if (
+      !navigator.mediaDevices ||
+      !navigator.mediaDevices.getDisplayMedia
+    ) {
+
+      setError(
+        "Seu navegador não suporta compartilhamento de tela."
+      );
+
+      return;
+    }
+
     try {
+
+      console.log(
+        "[SCREEN] solicitando captura..."
+      );
+
       const stream =
         await navigator.mediaDevices
           .getDisplayMedia({
@@ -881,12 +1163,24 @@ function App() {
             audio: true
           });
 
+      console.log(
+        "[SCREEN] captura iniciada",
+        stream
+      );
+
       localStream.current =
         stream;
 
       streams.current.set(
         "local",
         stream
+      );
+
+      setAudioStates(
+        current => ({
+          ...current,
+          local: false
+        })
       );
 
       setSharing(true);
@@ -902,6 +1196,7 @@ function App() {
         });
 
       if (!sent) {
+
         stream
           .getTracks()
           .forEach(
@@ -933,11 +1228,27 @@ function App() {
         stream.getVideoTracks()[0];
 
       if (videoTrack) {
+
         videoTrack.onended =
           () => {
+
+            console.log(
+              "[SCREEN] captura encerrada"
+            );
+
             stopSharing();
           };
       }
+
+      console.log(
+        "[SCREEN] vídeo:",
+        stream.getVideoTracks().length
+      );
+
+      console.log(
+        "[SCREEN] áudio:",
+        stream.getAudioTracks().length
+      );
 
       attachStream(
         "local",
@@ -945,6 +1256,12 @@ function App() {
       );
 
     } catch (error) {
+
+      console.error(
+        "[SCREEN] erro:",
+        error
+      );
+
       if (
         error?.name ===
         "NotAllowedError"
@@ -963,6 +1280,7 @@ function App() {
   ======================================================= */
 
   function stopSharing() {
+
     if (
       !localStream.current &&
       !sharing
@@ -970,16 +1288,14 @@ function App() {
       return;
     }
 
-    if (
-      ws.current &&
-      ws.current.readyState ===
-        WebSocket.OPEN
-    ) {
-      send({
-        type:
-          "stop-sharing"
-      });
-    }
+    console.log(
+      "[SCREEN] parando..."
+    );
+
+    send({
+      type:
+        "stop-sharing"
+    });
 
     for (
       const [
@@ -988,11 +1304,13 @@ function App() {
       ]
       of peerConnections.current
     ) {
+
       if (
         key.startsWith(
           "local->"
         )
       ) {
+
         try {
           pc.close();
         } catch {}
@@ -1010,6 +1328,7 @@ function App() {
     if (
       localStream.current
     ) {
+
       localStream.current
         .getTracks()
         .forEach(
@@ -1034,12 +1353,27 @@ function App() {
 
     setSharing(false);
 
+    setAudioStates(
+      current => {
+
+        const next = {
+          ...current
+        };
+
+        delete next.local;
+
+        return next;
+      }
+    );
+
     setSelectedProducer(
       current => {
+
         if (
           current ===
           "local"
         ) {
+
           return (
             producers[0] ||
             "local"
@@ -1062,10 +1396,14 @@ function App() {
   function requestOffer(
     producerId
   ) {
+
+    if (!producerId) {
+      return;
+    }
+
     if (
-      !producerId ||
       producerId ===
-        myId.current
+      myId.current
     ) {
       return;
     }
@@ -1082,6 +1420,11 @@ function App() {
       producerId
     );
 
+    console.log(
+      "[VIEWER] pedindo offer:",
+      producerId
+    );
+
     send({
       type:
         "request-offer",
@@ -1091,12 +1434,13 @@ function App() {
   }
 
   /* =======================================================
-     PRODUCER PEER
+     CREATE PRODUCER PEER
   ======================================================= */
 
   async function createProducerPeer(
     viewerId
   ) {
+
     if (
       !viewerId ||
       !localStream.current
@@ -1113,10 +1457,17 @@ function App() {
       );
 
     if (old) {
+
       if (
         old.signalingState !==
         "closed"
       ) {
+
+        console.log(
+          "[PRODUCER] peer já existe:",
+          key
+        );
+
         return;
       }
 
@@ -1124,6 +1475,11 @@ function App() {
         key
       );
     }
+
+    console.log(
+      "[PRODUCER] criando peer:",
+      key
+    );
 
     const iceServers =
       await getIceServers();
@@ -1147,6 +1503,7 @@ function App() {
       const track
       of localStream.current.getTracks()
     ) {
+
       pc.addTrack(
         track,
         localStream.current
@@ -1155,6 +1512,7 @@ function App() {
 
     pc.onicecandidate =
       event => {
+
         if (!event.candidate) {
           return;
         }
@@ -1178,12 +1536,20 @@ function App() {
 
     pc.onconnectionstatechange =
       () => {
+
+        console.log(
+          "[PRODUCER]",
+          viewerId,
+          pc.connectionState
+        );
+
         if (
           pc.connectionState ===
             "failed" ||
           pc.connectionState ===
             "closed"
         ) {
+
           peerConnections.current.delete(
             key
           );
@@ -1195,6 +1561,7 @@ function App() {
       };
 
     try {
+
       const offer =
         await pc.createOffer();
 
@@ -1216,7 +1583,18 @@ function App() {
           pc.localDescription
       });
 
-    } catch {
+      console.log(
+        "[PRODUCER] offer enviada:",
+        viewerId
+      );
+
+    } catch (error) {
+
+      console.error(
+        "[PRODUCER] erro offer:",
+        error
+      );
+
       try {
         pc.close();
       } catch {}
@@ -1238,6 +1616,7 @@ function App() {
   async function handleOffer(
     msg
   ) {
+
     const producerId =
       String(
         msg.producerId ||
@@ -1255,11 +1634,22 @@ function App() {
       !producerId ||
       !producerFrom
     ) {
+
+      console.warn(
+        "[VIEWER] offer inválida:",
+        msg
+      );
+
       return;
     }
 
     const key =
       `${producerId}->local`;
+
+    console.log(
+      "[VIEWER] offer recebida:",
+      producerId
+    );
 
     const old =
       peerConnections.current.get(
@@ -1267,10 +1657,17 @@ function App() {
       );
 
     if (old) {
+
       if (
         old.signalingState !==
         "closed"
       ) {
+
+        console.log(
+          "[VIEWER] peer já existe:",
+          key
+        );
+
         return;
       }
 
@@ -1299,16 +1696,26 @@ function App() {
 
     pc.ontrack =
       event => {
+
+        console.log(
+          "[VIEWER] TRACK:",
+          producerId,
+          event.track.kind,
+          event.track.readyState
+        );
+
         let stream =
           event.streams?.[0];
 
         if (!stream) {
+
           stream =
             streams.current.get(
               producerId
             );
 
           if (!stream) {
+
             stream =
               new MediaStream();
 
@@ -1328,12 +1735,14 @@ function App() {
               );
 
           if (!exists) {
+
             stream.addTrack(
               event.track
             );
           }
 
         } else {
+
           streams.current.set(
             producerId,
             stream
@@ -1347,6 +1756,7 @@ function App() {
 
         setProducers(
           current => {
+
             if (
               current.includes(
                 producerId
@@ -1368,6 +1778,7 @@ function App() {
 
     pc.onicecandidate =
       event => {
+
         if (!event.candidate) {
           return;
         }
@@ -1390,13 +1801,34 @@ function App() {
 
     pc.onconnectionstatechange =
       () => {
+
+        console.log(
+          "[VIEWER]",
+          producerId,
+          pc.connectionState
+        );
+
         if (
           pc.connectionState ===
           "connected"
         ) {
+
           setStatus(
             "Transmissão conectada"
           );
+
+          const stream =
+            streams.current.get(
+              producerId
+            );
+
+          if (stream) {
+
+            attachStream(
+              producerId,
+              stream
+            );
+          }
         }
 
         if (
@@ -1405,6 +1837,7 @@ function App() {
           pc.connectionState ===
             "closed"
         ) {
+
           console.warn(
             "[VIEWER] conexão encerrada:",
             producerId
@@ -1413,8 +1846,14 @@ function App() {
       };
 
     try {
+
       await pc.setRemoteDescription(
         msg.offer
+      );
+
+      console.log(
+        "[VIEWER] remoteDescription configurada:",
+        producerId
       );
 
       await flushPendingCandidates(
@@ -1442,8 +1881,9 @@ function App() {
       });
 
     } catch (error) {
+
       console.error(
-        "[VIEWER] erro:",
+        "[VIEWER] erro offer:",
         error
       );
 
@@ -1468,6 +1908,7 @@ function App() {
   async function handleAnswer(
     msg
   ) {
+
     const viewerId =
       String(
         msg.from ||
@@ -1487,14 +1928,27 @@ function App() {
       );
 
     if (!pc) {
+
+      console.warn(
+        "[PRODUCER] peer não encontrado:",
+        key
+      );
+
       return;
     }
 
     try {
+
       if (
         pc.signalingState !==
         "have-local-offer"
       ) {
+
+        console.warn(
+          "[PRODUCER] estado inesperado:",
+          pc.signalingState
+        );
+
         return;
       }
 
@@ -1502,13 +1956,19 @@ function App() {
         msg.answer
       );
 
+      console.log(
+        "[PRODUCER] answer recebida:",
+        viewerId
+      );
+
       await flushPendingCandidates(
         key
       );
 
     } catch (error) {
+
       console.error(
-        "[PRODUCER] erro:",
+        "[PRODUCER] erro answer:",
         error
       );
     }
@@ -1521,6 +1981,7 @@ function App() {
   async function handleIce(
     msg
   ) {
+
     if (!msg.candidate) {
       return;
     }
@@ -1541,6 +2002,12 @@ function App() {
       !producerId ||
       !from
     ) {
+
+      console.warn(
+        "[ICE] mensagem incompleta:",
+        msg
+      );
+
       return;
     }
 
@@ -1550,9 +2017,12 @@ function App() {
       producerId ===
       myId.current
     ) {
+
       key =
         `local->${from}`;
+
     } else {
+
       key =
         `${producerId}->local`;
     }
@@ -1563,11 +2033,18 @@ function App() {
       );
 
     if (!pc) {
+
+      console.log(
+        "[ICE] peer ainda não existe:",
+        key
+      );
+
       if (
         !pendingCandidates.current.has(
           key
         )
       ) {
+
         pendingCandidates.current.set(
           key,
           []
@@ -1586,11 +2063,18 @@ function App() {
     if (
       !pc.remoteDescription
     ) {
+
+      console.log(
+        "[ICE] aguardando remoteDescription:",
+        key
+      );
+
       if (
         !pendingCandidates.current.has(
           key
         )
       ) {
+
         pendingCandidates.current.set(
           key,
           []
@@ -1607,12 +2091,21 @@ function App() {
     }
 
     try {
+
       await pc.addIceCandidate(
         msg.candidate
       );
+
+      console.log(
+        "[ICE] candidato adicionado:",
+        key
+      );
+
     } catch (error) {
+
       console.warn(
         "[ICE] erro:",
+        key,
         error
       );
     }
@@ -1625,13 +2118,17 @@ function App() {
   async function flushPendingCandidates(
     key
   ) {
+
     const pc =
       peerConnections.current.get(
         key
       );
 
+    if (!pc) {
+      return;
+    }
+
     if (
-      !pc ||
       !pc.remoteDescription
     ) {
       return;
@@ -1653,17 +2150,26 @@ function App() {
       key
     );
 
+    console.log(
+      `[ICE] processando ${list.length} candidatos:`,
+      key
+    );
+
     for (
       const candidate
       of list
     ) {
+
       try {
+
         await pc.addIceCandidate(
           candidate
         );
+
       } catch (error) {
+
         console.warn(
-          "[ICE] erro:",
+          "[ICE] erro candidato:",
           error
         );
       }
@@ -1677,6 +2183,7 @@ function App() {
   function removeRemoteProducer(
     producerId
   ) {
+
     if (!producerId) {
       return;
     }
@@ -1694,6 +2201,7 @@ function App() {
       );
 
     if (pc) {
+
       try {
         pc.close();
       } catch {}
@@ -1728,11 +2236,33 @@ function App() {
         )
     );
 
+    setAudioStates(
+      current => {
+
+        const next = {
+          ...current
+        };
+
+        delete next[
+          producerId
+        ];
+
+        return next;
+      }
+    );
+
     setSelectedProducer(
-      current =>
-        current === producerId
-          ? "local"
-          : current
+      current => {
+
+        if (
+          current !==
+          producerId
+        ) {
+          return current;
+        }
+
+        return "local";
+      }
     );
   }
 
@@ -1743,6 +2273,7 @@ function App() {
   function toggleAudio(
     producerId
   ) {
+
     const next =
       !(
         audioStates[
@@ -1771,6 +2302,7 @@ function App() {
       const video
       of videos
     ) {
+
       video.muted =
         !next;
 
@@ -1778,7 +2310,8 @@ function App() {
         1;
 
       if (next) {
-        video.play()
+        video
+          .play()
           .catch(() => {});
       }
     }
@@ -1791,23 +2324,27 @@ function App() {
   function selectProducer(
     producerId
   ) {
+
     setSelectedProducer(
       producerId
     );
 
     setTimeout(
       () => {
+
         const stream =
           streams.current.get(
             producerId
           );
 
-        if (stream) {
-          attachStream(
-            producerId,
-            stream
-          );
+        if (!stream) {
+          return;
         }
+
+        attachStream(
+          producerId,
+          stream
+        );
       },
       0
     );
@@ -1818,9 +2355,11 @@ function App() {
   ======================================================= */
 
   function cleanupStreams() {
+
     if (
       localStream.current
     ) {
+
       localStream.current
         .getTracks()
         .forEach(
@@ -1839,6 +2378,7 @@ function App() {
       const stream
       of streams.current.values()
     ) {
+
       stream
         .getTracks()
         .forEach(
@@ -1856,6 +2396,7 @@ function App() {
       const pc
       of peerConnections.current.values()
     ) {
+
       try {
         pc.close();
       } catch {}
@@ -1871,10 +2412,12 @@ function App() {
       const videos
       of videoRefs.current.values()
     ) {
+
       for (
         const video
         of videos
       ) {
+
         try {
           video.pause();
           video.srcObject =
@@ -1887,6 +2430,7 @@ function App() {
   }
 
   function cleanupAll() {
+
     cleanupStreams();
 
     roomId.current =
@@ -1943,7 +2487,7 @@ function App() {
           <div className="brand">
 
             <span className="eyebrow">
-              SCREENCAST
+              DISCORD ACTIVITY
             </span>
 
             <h1>
@@ -1988,6 +2532,7 @@ function App() {
               }
               onKeyDown={
                 event => {
+
                   if (
                     event.key ===
                     "Enter"
@@ -2023,8 +2568,7 @@ function App() {
             <span
               className={
                 `dot ${
-                  ws.current?.readyState ===
-                  WebSocket.OPEN
+                  discordReady
                     ? "on"
                     : ""
                 }`
@@ -2107,11 +2651,14 @@ function App() {
                       <video
                         ref={
                           element => {
+
                             if (element) {
+
                               registerVideo(
                                 "local",
                                 element
                               );
+
                             }
                           }
                         }
@@ -2141,11 +2688,14 @@ function App() {
                     <video
                       ref={
                         element => {
+
                           if (element) {
+
                             registerVideo(
                               mainProducer,
                               element
                             );
+
                           }
                         }
                       }
@@ -2276,11 +2826,14 @@ function App() {
                           <video
                             ref={
                               element => {
+
                                 if (element) {
+
                                   registerVideo(
                                     producerId,
                                     element
                                   );
+
                                 }
                               }
                             }
@@ -2315,6 +2868,7 @@ function App() {
                             className="thumb-audio"
                             onClick={
                               event => {
+
                                 event.stopPropagation();
 
                                 toggleAudio(
@@ -2421,18 +2975,30 @@ function App() {
    START
 ========================================================= */
 
+console.log(
+  "[APP] carregando main.jsx..."
+);
+
 const root =
   document.getElementById(
     "root"
   );
 
 if (!root) {
+
+  console.error(
+    "[APP] ERRO: #root não encontrado."
+  );
+
   throw new Error(
     "Elemento #root não encontrado."
   );
 }
 
+console.log(
+  "[APP] #root encontrado. Renderizando..."
+);
+
 createRoot(root).render(
   <App />
 );
-
