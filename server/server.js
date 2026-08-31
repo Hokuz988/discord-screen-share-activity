@@ -203,8 +203,14 @@ function getProducerList(room) {
   }
 
   return Array.from(
-    room.producers.keys()
-  );
+    room.producers.values()
+  ).map(producer => ({
+    id: producer.id,
+
+    displayName:
+      producer.displayName ||
+      "Sem nome"
+  }));
 }
 
 function updateProducerList(room) {
@@ -386,6 +392,7 @@ function leaveRoom(ws) {
 
   ws.room = null;
   ws.isProducer = false;
+  ws.displayName = "";
 
   if (room.clients.size > 0) {
     updateProducerList(room);
@@ -431,6 +438,8 @@ wss.on(
     ws.room = null;
 
     ws.isProducer = false;
+
+    ws.displayName = "";
 
     ws.isAlive = true;
 
@@ -527,6 +536,9 @@ wss.on(
 
           ws.isProducer =
             false;
+
+          ws.displayName =
+            "";
 
           send(
             ws,
@@ -626,6 +638,9 @@ wss.on(
 
           ws.isProducer =
             false;
+
+          ws.displayName =
+            "";
 
           send(
             ws,
@@ -753,6 +768,28 @@ wss.on(
             return;
           }
 
+          /*
+           * NOME DA TRANSMISSÃO
+           *
+           * O frontend deve mandar:
+           *
+           * {
+           *   type: "start-sharing",
+           *   displayName: "Hokuz"
+           * }
+           */
+
+          const displayName =
+            String(
+              msg.displayName || ""
+            )
+              .trim()
+              .slice(0, 40);
+
+          ws.displayName =
+            displayName ||
+            "Sem nome";
+
           room.producers.set(
             ws.id,
             ws
@@ -762,8 +799,13 @@ wss.on(
             true;
 
           console.log(
-            `[PRODUCER] ${ws.id} COMEÇOU A TRANSMITIR`
+            `[PRODUCER] ${ws.id} COMEÇOU A TRANSMITIR COMO "${ws.displayName}"`
           );
+
+          /*
+           * Avisamos os outros clientes
+           * que uma nova transmissão existe.
+           */
 
           broadcast(
             room,
@@ -772,7 +814,10 @@ wss.on(
                 "producer",
 
               producerId:
-                ws.id
+                ws.id,
+
+              displayName:
+                ws.displayName
             },
             ws
           );
@@ -1095,6 +1140,10 @@ wss.on(
           return;
         }
 
+        /* =================================================
+           UNKNOWN MESSAGE
+        ================================================= */
+
         console.warn(
           `[MESSAGE] tipo desconhecido: ${msg.type}`
         );
@@ -1203,6 +1252,10 @@ server.listen(
 
     console.log(
       ` Max producers: ${MAX_PRODUCERS}`
+    );
+
+    console.log(
+      " Display Name: ENABLED"
     );
 
     console.log(

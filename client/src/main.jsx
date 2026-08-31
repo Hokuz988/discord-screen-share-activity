@@ -74,6 +74,7 @@ async function getIceServers() {
     return data.iceServers;
 
   } catch (error) {
+
     console.warn(
       "[TURN] indisponível, usando STUN:",
       error
@@ -156,6 +157,14 @@ function App() {
     setStreamVersion
   ] = useState(0);
 
+  /*
+   * Nome informado pelo usuário.
+   */
+  const [
+    username,
+    setUsername
+  ] = useState("");
+
   /* =======================================================
      REFS
   ======================================================= */
@@ -223,6 +232,7 @@ function App() {
       ws.current.readyState !==
         WebSocket.OPEN
     ) {
+
       console.warn(
         "[SEND] WebSocket não conectado:",
         message
@@ -239,6 +249,7 @@ function App() {
       !payload.roomId &&
       roomId.current
     ) {
+
       payload.roomId =
         roomId.current;
     }
@@ -288,8 +299,6 @@ function App() {
     }
 
     /*
-     * IMPORTANTE:
-     *
      * Somente o vídeo principal recebe
      * a MediaStream.
      *
@@ -312,11 +321,13 @@ function App() {
     if (
       producerId === "local"
     ) {
+
       video.muted =
         true;
 
       video.volume =
         0;
+
     } else {
 
       /*
@@ -1982,10 +1993,26 @@ function App() {
 
     setError("");
 
+    const name =
+      username
+        .trim();
+
+    if (!name) {
+
+      setError(
+        "Digite seu nome primeiro."
+      );
+
+      return;
+    }
+
     send({
 
       type:
-        "create-room"
+        "create-room",
+
+      username:
+        name
 
     });
   }
@@ -1997,6 +2024,19 @@ function App() {
   function joinRoom() {
 
     setError("");
+
+    const name =
+      username
+        .trim();
+
+    if (!name) {
+
+      setError(
+        "Digite seu nome primeiro."
+      );
+
+      return;
+    }
 
     const code =
       roomInput
@@ -2018,7 +2058,10 @@ function App() {
         "join-room",
 
       roomId:
-        code
+        code,
+
+      username:
+        name
 
     });
   }
@@ -2227,10 +2270,13 @@ function App() {
       "";
 
     setSharing(false);
+
     setProducers([]);
+
     setSelectedProducer(
       "local"
     );
+
     setViewerCount(0);
   }
 
@@ -2883,6 +2929,41 @@ function App() {
 
           </div>
 
+          {/* =================================================
+              NOME DO USUÁRIO
+          ================================================= */}
+
+          <div className="name-box">
+
+            <input
+              value={
+                username
+              }
+              onChange={
+                event =>
+                  setUsername(
+                    event.target.value
+                  )
+              }
+              onKeyDown={
+                event => {
+
+                  if (
+                    event.key ===
+                    "Enter"
+                  ) {
+
+                    createRoom();
+                  }
+                }
+              }
+              placeholder="Seu nome"
+              maxLength={24}
+              autoComplete="off"
+            />
+
+          </div>
+
           <button
             className="primary"
             onClick={
@@ -3040,16 +3121,6 @@ function App() {
 
                     sharing ? (
 
-                      /*
-                       * VÍDEO DO TRANSMISSOR
-                       *
-                       * muted=true
-                       * volume=0
-                       *
-                       * Portanto ele nunca
-                       * escuta a própria tela.
-                       */
-
                       <video
                         ref={
                           element => {
@@ -3097,19 +3168,6 @@ function App() {
 
                   ) : (
 
-                    /*
-                     * VÍDEO DE QUEM ESTÁ TRANSMITINDO
-                     *
-                     * NÃO usamos muted aqui.
-                     *
-                     * O usuário controla tudo
-                     * pelos controles nativos:
-                     *
-                     * 🔊 volume
-                     * 🔇 mute
-                     * 🎚️ volume
-                     */
-
                     <video
                       ref={
                         element => {
@@ -3147,7 +3205,7 @@ function App() {
 
                       {mainProducer ===
                       "local"
-                        ? "Sua transmissão"
+                        ? `${username || "Sua"} transmissão`
                         : "Transmissão ao vivo"}
 
                     </div>
@@ -3217,16 +3275,6 @@ function App() {
 
                     return (
 
-                      /*
-                       * IMPORTANTE:
-                       *
-                       * A miniatura agora NÃO é
-                       * um <video>.
-                       *
-                       * Portanto ela não pode
-                       * reproduzir áudio.
-                       */
-
                       <button
                         key={
                           producerId
@@ -3271,7 +3319,7 @@ function App() {
 
                           <span>
                             {isLocal
-                              ? "Você"
+                              ? username || "Você"
                               : "Transmissão"}
                           </span>
 
