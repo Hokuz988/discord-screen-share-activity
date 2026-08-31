@@ -207,8 +207,21 @@ function getProducerList(room) {
   ).map(producer => ({
     id: producer.id,
 
+    producerId: producer.id,
+
+    name:
+      producer.displayName ||
+      producer.userName ||
+      "Sem nome",
+
     displayName:
       producer.displayName ||
+      producer.userName ||
+      "Sem nome",
+
+    producerName:
+      producer.displayName ||
+      producer.userName ||
       "Sem nome"
   }));
 }
@@ -229,7 +242,9 @@ function updateProducerList(room) {
   broadcast(
     room,
     {
-      type: "producer-list",
+      type:
+        "producer-list",
+
       producers
     }
   );
@@ -260,14 +275,14 @@ function updateViewerCount(room) {
     return;
   }
 
-  const count =
-    getViewerCount(room);
-
   broadcast(
     room,
     {
-      type: "viewer-count",
-      count
+      type:
+        "viewer-count",
+
+      count:
+        getViewerCount(room)
     }
   );
 }
@@ -357,8 +372,11 @@ function removeProducer(ws) {
   broadcast(
     room,
     {
-      type: "producer-left",
-      producerId: ws.id
+      type:
+        "producer-left",
+
+      producerId:
+        ws.id
     },
     ws
   );
@@ -392,7 +410,6 @@ function leaveRoom(ws) {
 
   ws.room = null;
   ws.isProducer = false;
-  ws.displayName = "";
 
   if (room.clients.size > 0) {
     updateProducerList(room);
@@ -407,7 +424,7 @@ function leaveRoom(ws) {
 }
 
 /* =========================================================
-   VALIDATE SAME ROOM
+   SAME ROOM
 ========================================================= */
 
 function sameRoom(
@@ -432,16 +449,23 @@ function sameRoom(
 wss.on(
   "connection",
   ws => {
+
     ws.id =
       crypto.randomUUID();
 
     ws.room = null;
 
-    ws.isProducer = false;
+    ws.isProducer =
+      false;
 
-    ws.displayName = "";
+    ws.userName =
+      "";
 
-    ws.isAlive = true;
+    ws.displayName =
+      "";
+
+    ws.isAlive =
+      true;
 
     console.log(
       `[CONNECT] ${ws.id}`
@@ -450,8 +474,11 @@ wss.on(
     send(
       ws,
       {
-        type: "client-id",
-        id: ws.id
+        type:
+          "client-id",
+
+        id:
+          ws.id
       }
     );
 
@@ -473,6 +500,7 @@ wss.on(
     ws.on(
       "message",
       raw => {
+
         let msg;
 
         try {
@@ -480,6 +508,7 @@ wss.on(
             JSON.parse(
               raw.toString()
             );
+
         } catch {
           console.warn(
             `[MESSAGE] JSON inválido de ${ws.id}`
@@ -490,7 +519,8 @@ wss.on(
 
         if (
           !msg ||
-          typeof msg.type !== "string"
+          typeof msg.type !==
+            "string"
         ) {
           return;
         }
@@ -507,6 +537,7 @@ wss.on(
           msg.type ===
           "create-room"
         ) {
+
           if (ws.room) {
             leaveRoom(ws);
           }
@@ -515,7 +546,8 @@ wss.on(
             createRoomCode();
 
           const room = {
-            id: roomId,
+            id:
+              roomId,
 
             clients:
               new Set(),
@@ -529,7 +561,9 @@ wss.on(
             room
           );
 
-          room.clients.add(ws);
+          room.clients.add(
+            ws
+          );
 
           ws.room =
             room;
@@ -537,8 +571,17 @@ wss.on(
           ws.isProducer =
             false;
 
+          ws.userName =
+            String(
+              msg.userName ||
+              msg.displayName ||
+              ""
+            )
+              .trim()
+              .slice(0, 40);
+
           ws.displayName =
-            "";
+            ws.userName;
 
           send(
             ws,
@@ -573,7 +616,7 @@ wss.on(
           );
 
           console.log(
-            `[ROOM] criada: ${roomId} por ${ws.id}`
+            `[ROOM] criada: ${roomId} por ${ws.id} (${ws.userName || "Sem nome"})`
           );
 
           return;
@@ -587,9 +630,11 @@ wss.on(
           msg.type ===
           "join-room"
         ) {
+
           const roomId =
             String(
-              msg.roomId || ""
+              msg.roomId ||
+              ""
             )
               .trim()
               .toUpperCase();
@@ -610,7 +655,9 @@ wss.on(
           }
 
           const room =
-            rooms.get(roomId);
+            rooms.get(
+              roomId
+            );
 
           if (!room) {
             send(
@@ -631,7 +678,9 @@ wss.on(
             leaveRoom(ws);
           }
 
-          room.clients.add(ws);
+          room.clients.add(
+            ws
+          );
 
           ws.room =
             room;
@@ -639,8 +688,17 @@ wss.on(
           ws.isProducer =
             false;
 
+          ws.userName =
+            String(
+              msg.userName ||
+              msg.displayName ||
+              ""
+            )
+              .trim()
+              .slice(0, 40);
+
           ws.displayName =
-            "";
+            ws.userName;
 
           send(
             ws,
@@ -659,7 +717,9 @@ wss.on(
                 "producer-list",
 
               producers:
-                getProducerList(room)
+                getProducerList(
+                  room
+                )
             }
           );
 
@@ -670,7 +730,9 @@ wss.on(
                 "viewer-count",
 
               count:
-                getViewerCount(room)
+                getViewerCount(
+                  room
+                )
             }
           );
 
@@ -681,15 +743,19 @@ wss.on(
                 "producer-list",
 
               producers:
-                getProducerList(room)
+                getProducerList(
+                  room
+                )
             },
             ws
           );
 
-          updateViewerCount(room);
+          updateViewerCount(
+            room
+          );
 
           console.log(
-            `[ROOM] ${ws.id} entrou em ${roomId}`
+            `[ROOM] ${ws.id} entrou em ${roomId} como "${ws.userName || "Sem nome"}"`
           );
 
           return;
@@ -703,6 +769,7 @@ wss.on(
           msg.type ===
           "leave-room"
         ) {
+
           leaveRoom(ws);
 
           send(
@@ -724,6 +791,7 @@ wss.on(
           msg.type ===
           "start-sharing"
         ) {
+
           const room =
             ws.room;
 
@@ -742,11 +810,35 @@ wss.on(
             return;
           }
 
+          /*
+           * PROTEÇÃO PRINCIPAL CONTRA DUPLICAÇÃO.
+           *
+           * Cada conexão só pode possuir
+           * UMA transmissão.
+           */
+
           if (
             room.producers.has(
               ws.id
-            )
+            ) ||
+            ws.isProducer
           ) {
+
+            console.warn(
+              `[PRODUCER] ${ws.id} tentou iniciar uma segunda transmissão. Ignorado.`
+            );
+
+            send(
+              ws,
+              {
+                type:
+                  "sharing-already-active",
+
+                producerId:
+                  ws.id
+              }
+            );
+
             return;
           }
 
@@ -754,6 +846,7 @@ wss.on(
             room.producers.size >=
             MAX_PRODUCERS
           ) {
+
             send(
               ws,
               {
@@ -769,26 +862,35 @@ wss.on(
           }
 
           /*
-           * NOME DA TRANSMISSÃO
-           *
-           * O frontend deve mandar:
-           *
-           * {
-           *   type: "start-sharing",
-           *   displayName: "Hokuz"
-           * }
+           * ACEITA QUALQUER UMA DAS FORMAS,
+           * MAS NORMALIZA INTERNAMENTE.
            */
 
           const displayName =
             String(
-              msg.displayName || ""
+              msg.displayName ||
+              msg.producerName ||
+              msg.userName ||
+              ws.userName ||
+              ""
             )
               .trim()
               .slice(0, 40);
 
+          ws.userName =
+            displayName ||
+            ws.userName ||
+            "Usuário";
+
           ws.displayName =
             displayName ||
-            "Sem nome";
+            ws.userName ||
+            "Usuário";
+
+          /*
+           * Só AGORA transforma a conexão
+           * em producer.
+           */
 
           room.producers.set(
             ws.id,
@@ -803,8 +905,7 @@ wss.on(
           );
 
           /*
-           * Avisamos os outros clientes
-           * que uma nova transmissão existe.
+           * Um único evento de producer.
            */
 
           broadcast(
@@ -817,13 +918,28 @@ wss.on(
                 ws.id,
 
               displayName:
+                ws.displayName,
+
+              producerName:
+                ws.displayName,
+
+              name:
                 ws.displayName
             },
             ws
           );
 
-          updateProducerList(room);
-          updateViewerCount(room);
+          /*
+           * Atualiza lista completa.
+           */
+
+          updateProducerList(
+            room
+          );
+
+          updateViewerCount(
+            room
+          );
 
           return;
         }
@@ -836,11 +952,14 @@ wss.on(
           msg.type ===
           "stop-sharing"
         ) {
+
           console.log(
             `[PRODUCER] ${ws.id} enviou STOP`
           );
 
-          removeProducer(ws);
+          removeProducer(
+            ws
+          );
 
           return;
         }
@@ -853,6 +972,7 @@ wss.on(
           msg.type ===
           "request-offer"
         ) {
+
           const room =
             ws.room;
 
@@ -862,7 +982,8 @@ wss.on(
 
           const producerId =
             String(
-              msg.producerId || ""
+              msg.producerId ||
+              ""
             );
 
           if (!producerId) {
@@ -927,6 +1048,7 @@ wss.on(
           msg.type ===
           "offer"
         ) {
+
           const room =
             ws.room;
 
@@ -936,7 +1058,8 @@ wss.on(
 
           const targetId =
             String(
-              msg.target || ""
+              msg.target ||
+              ""
             );
 
           if (!targetId) {
@@ -982,6 +1105,11 @@ wss.on(
               producerId:
                 ws.id,
 
+              producerName:
+                ws.displayName ||
+                ws.userName ||
+                "Usuário",
+
               offer:
                 msg.offer
             }
@@ -998,6 +1126,7 @@ wss.on(
           msg.type ===
           "answer"
         ) {
+
           const room =
             ws.room;
 
@@ -1007,7 +1136,8 @@ wss.on(
 
           const targetId =
             String(
-              msg.target || ""
+              msg.target ||
+              ""
             );
 
           if (!targetId) {
@@ -1069,6 +1199,7 @@ wss.on(
           msg.type ===
           "ice"
         ) {
+
           const room =
             ws.room;
 
@@ -1078,7 +1209,8 @@ wss.on(
 
           const targetId =
             String(
-              msg.target || ""
+              msg.target ||
+              ""
             );
 
           if (!targetId) {
@@ -1106,7 +1238,8 @@ wss.on(
 
           const producerId =
             String(
-              msg.producerId || ""
+              msg.producerId ||
+              ""
             );
 
           if (!producerId) {
@@ -1141,7 +1274,7 @@ wss.on(
         }
 
         /* =================================================
-           UNKNOWN MESSAGE
+           UNKNOWN
         ================================================= */
 
         console.warn(
@@ -1157,16 +1290,20 @@ wss.on(
     ws.on(
       "close",
       (code, reason) => {
+
         console.log(
           `[DISCONNECT] ${ws.id}`,
           {
             code,
             reason:
-              reason?.toString() || ""
+              reason?.toString() ||
+              ""
           }
         );
 
-        leaveRoom(ws);
+        leaveRoom(
+          ws
+        );
       }
     );
 
@@ -1177,6 +1314,7 @@ wss.on(
     ws.on(
       "error",
       error => {
+
         console.error(
           `[WS ERROR] ${ws.id}`,
           error
@@ -1193,10 +1331,17 @@ wss.on(
 const heartbeatInterval =
   setInterval(
     () => {
-      for (const ws of wss.clients) {
+
+      for (
+        const ws
+        of wss.clients
+      ) {
+
         if (
-          ws.isAlive === false
+          ws.isAlive ===
+          false
         ) {
+
           console.log(
             `[HEARTBEAT] encerrando conexão ${ws.id}`
           );
@@ -1206,17 +1351,21 @@ const heartbeatInterval =
           continue;
         }
 
-        ws.isAlive = false;
+        ws.isAlive =
+          false;
 
         try {
           ws.ping();
+
         } catch (error) {
+
           console.error(
             "[HEARTBEAT]",
             error
           );
         }
       }
+
     },
     30000
   );
@@ -1238,6 +1387,7 @@ server.listen(
   PORT,
   "0.0.0.0",
   () => {
+
     console.log(
       "========================================"
     );
@@ -1256,6 +1406,10 @@ server.listen(
 
     console.log(
       " Display Name: ENABLED"
+    );
+
+    console.log(
+      " Duplicate protection: ENABLED"
     );
 
     console.log(

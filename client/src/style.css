@@ -25,6 +25,11 @@ button {
   cursor: pointer;
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
 button:focus-visible,
 input:focus-visible {
   outline: 2px solid #5865f2;
@@ -54,6 +59,7 @@ input:focus-visible {
 
 .room-menu {
   width: min(480px, calc(100% - 32px));
+
   margin: 0 auto;
   padding: 42px 36px;
 
@@ -65,8 +71,6 @@ input:focus-visible {
   box-shadow:
     0 25px 80px rgba(0, 0, 0, 0.45);
 }
-
-/* Centraliza somente a tela inicial */
 
 .app:has(.room-menu) {
   min-height: 100vh;
@@ -81,11 +85,12 @@ input:focus-visible {
 ========================================================= */
 
 .brand {
-  margin-bottom: 28px;
+  margin-bottom: 26px;
 }
 
 .eyebrow {
   display: block;
+
   margin-bottom: 8px;
 
   font-size: 11px;
@@ -106,6 +111,7 @@ input:focus-visible {
   margin: 0;
 
   color: #a8abb2;
+
   line-height: 1.55;
 }
 
@@ -114,13 +120,14 @@ input:focus-visible {
 ========================================================= */
 
 .name-field {
-  margin-bottom: 16px;
+  width: 100%;
+  margin-bottom: 18px;
 }
 
 .name-field label {
   display: block;
 
-  margin-bottom: 7px;
+  margin-bottom: 8px;
 
   color: #b5bac1;
 
@@ -130,8 +137,9 @@ input:focus-visible {
 
 .name-input {
   width: 100%;
+  height: 48px;
 
-  padding: 14px;
+  padding: 0 14px;
 
   border: 1px solid #35373c;
   border-radius: 10px;
@@ -139,55 +147,42 @@ input:focus-visible {
   outline: none;
 
   background: #111214;
-  color: white;
+  color: #ffffff;
+
+  font-size: 14px;
 
   transition:
-    border-color 0.2s,
-    box-shadow 0.2s;
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    background 0.2s ease;
 }
 
 .name-input::placeholder {
-  color: #777b83;
+  color: #6f737b;
+}
+
+.name-input:hover {
+  border-color: #464950;
+  background: #131519;
 }
 
 .name-input:focus {
   border-color: #5865f2;
 
-  box-shadow:
-    0 0 0 3px
-    rgba(88, 101, 242, 0.15);
-}
-
-/* Caso o input de nome use somente .name */
-
-input.name {
-  width: 100%;
-
-  padding: 14px;
-
-  border: 1px solid #35373c;
-  border-radius: 10px;
-
-  outline: none;
-
   background: #111214;
-  color: white;
-
-  transition:
-    border-color 0.2s,
-    box-shadow 0.2s;
-}
-
-input.name::placeholder {
-  color: #777b83;
-}
-
-input.name:focus {
-  border-color: #5865f2;
 
   box-shadow:
     0 0 0 3px
     rgba(88, 101, 242, 0.15);
+}
+
+.name-hint {
+  margin-top: 6px;
+
+  color: #6f737b;
+
+  font-size: 10px;
+  line-height: 1.4;
 }
 
 /* =========================================================
@@ -202,6 +197,7 @@ input.name:focus {
   margin: 22px 0;
 
   color: #6f737b;
+
   font-size: 12px;
 }
 
@@ -224,7 +220,8 @@ input.name:focus {
   display: grid;
 
   grid-template-columns:
-    1fr 100px;
+    1fr
+    100px;
 
   gap: 10px;
 }
@@ -243,6 +240,7 @@ input.name:focus {
   color: white;
 
   text-align: center;
+
   text-transform: uppercase;
   letter-spacing: 2px;
 
@@ -279,6 +277,7 @@ input.name:focus {
   margin-top: 24px;
 
   color: #858991;
+
   font-size: 12px;
 }
 
@@ -340,6 +339,7 @@ input.name:focus {
 .room-info {
   display: flex;
   align-items: center;
+
   gap: 12px;
 }
 
@@ -348,6 +348,7 @@ input.name:focus {
 
   font-size: 10px;
   font-weight: 700;
+
   letter-spacing: 1.5px;
 }
 
@@ -359,26 +360,31 @@ input.name:focus {
   background: #111214;
 
   font-size: 14px;
+
   letter-spacing: 3px;
 }
 
 .live-users {
   color: #a8abb2;
+
   font-size: 12px;
 }
 
 .room-actions {
   display: flex;
   align-items: center;
+
   gap: 14px;
 }
 
 .server-status {
   display: flex;
   align-items: center;
+
   gap: 7px;
 
   color: #858991;
+
   font-size: 11px;
 }
 
@@ -389,6 +395,7 @@ input.name:focus {
   padding: 8px 13px;
 
   background: #2b2d31;
+
   color: white;
 
   font-size: 12px;
@@ -415,6 +422,7 @@ input.name:focus {
   width: 100%;
 
   flex: 1;
+
   min-height: 0;
 
   display: grid;
@@ -477,6 +485,16 @@ input.name:focus {
   background: #000;
 }
 
+@media (min-width: 1000px) {
+
+  .main-video-wrapper {
+    aspect-ratio: 16 / 9;
+
+    max-height:
+      calc(100vh - 105px);
+  }
+}
+
 /* =========================================================
    MAIN OVERLAY
 ========================================================= */
@@ -504,7 +522,9 @@ input.name:focus {
 }
 
 .stream-title {
-  max-width: 80%;
+  max-width: 70%;
+
+  overflow: hidden;
 
   padding: 6px 9px;
 
@@ -515,46 +535,13 @@ input.name:focus {
 
   backdrop-filter: blur(6px);
 
+  color: #ffffff;
+
   font-size: 12px;
   font-weight: 700;
 
-  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.audio-button {
-  pointer-events: auto;
-
-  width: 38px;
-  height: 38px;
-
-  border: 1px solid
-    rgba(255, 255, 255, 0.12);
-
-  border-radius: 50%;
-
-  background:
-    rgba(0, 0, 0, 0.65);
-
-  color: white;
-
-  font-size: 16px;
-
-  backdrop-filter: blur(8px);
-
-  transition:
-    background 0.2s,
-    transform 0.15s;
-}
-
-.audio-button:hover {
-  background:
-    rgba(255, 255, 255, 0.15);
-}
-
-.audio-button:active {
-  transform: scale(0.92);
 }
 
 /* =========================================================
@@ -566,6 +553,7 @@ input.name:focus {
   height: 100%;
 
   display: flex;
+
   flex-direction: column;
 
   align-items: center;
@@ -629,6 +617,7 @@ input.name:focus {
 
 .sidebar-header > div {
   display: flex;
+
   align-items: center;
   justify-content: space-between;
 
@@ -641,6 +630,7 @@ input.name:focus {
 
 .sidebar-header span {
   color: #777b83;
+
   font-size: 11px;
 }
 
@@ -650,6 +640,7 @@ input.name:focus {
 
 .stream-list {
   flex: 1;
+
   min-height: 0;
 
   overflow-y: auto;
@@ -657,6 +648,7 @@ input.name:focus {
   padding: 12px;
 
   display: flex;
+
   flex-direction: column;
 
   gap: 10px;
@@ -672,11 +664,13 @@ input.name:focus {
   padding: 0;
 
   border: 1px solid #292b30;
+
   border-radius: 10px;
 
   overflow: hidden;
 
   background: #18191c;
+
   color: white;
 
   text-align: left;
@@ -717,52 +711,41 @@ input.name:focus {
   background: #000;
 }
 
-.thumb-video video {
-  width: 100%;
-  height: 100%;
-
-  display: block;
-
-  object-fit: cover;
-
-  background: #000;
-}
-
-/* Placeholder das miniaturas */
-
 .thumb-placeholder {
   width: 100%;
   height: 100%;
 
   display: flex;
+
   flex-direction: column;
 
   align-items: center;
   justify-content: center;
 
-  gap: 6px;
+  gap: 7px;
 
-  color: #777b83;
+  padding: 10px;
+
+  color: #858991;
 
   background:
     radial-gradient(
-      circle at center,
-      #1d2025,
-      #0b0c0f
+      circle,
+      #1b1d21,
+      #08090a
     );
 
+  text-align: center;
+
   font-size: 10px;
+  font-weight: 700;
 }
 
 .thumb-screen-icon {
-  font-size: 25px;
+  font-size: 26px;
 
   opacity: 0.65;
 }
-
-/* =========================================================
-   LIVE BADGE
-========================================================= */
 
 .thumb-live {
   position: absolute;
@@ -790,7 +773,7 @@ input.name:focus {
 ========================================================= */
 
 .thumb-info {
-  min-height: 42px;
+  min-height: 38px;
 
   padding: 7px 9px;
 
@@ -803,8 +786,6 @@ input.name:focus {
 }
 
 .thumb-info > span:first-child {
-  min-width: 0;
-
   overflow: hidden;
 
   color: #d6d8dc;
@@ -813,72 +794,8 @@ input.name:focus {
   font-weight: 700;
 
   text-overflow: ellipsis;
+
   white-space: nowrap;
-}
-
-/* Nome do usuário */
-
-.thumb-name {
-  min-width: 0;
-
-  display: flex;
-  flex-direction: column;
-
-  gap: 2px;
-
-  overflow: hidden;
-}
-
-.thumb-name strong {
-  overflow: hidden;
-
-  color: #ffffff;
-
-  font-size: 11px;
-  font-weight: 700;
-
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.thumb-name span {
-  overflow: hidden;
-
-  color: #777b83;
-
-  font-size: 9px;
-
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* =========================================================
-   THUMB AUDIO
-========================================================= */
-
-.thumb-audio {
-  width: 26px;
-  height: 26px;
-
-  display: flex;
-
-  align-items: center;
-  justify-content: center;
-
-  flex: 0 0 auto;
-
-  border-radius: 6px;
-
-  background: #25272b;
-
-  font-size: 12px;
-
-  transition:
-    background 0.2s;
-}
-
-.thumb-audio:hover {
-  background: #34373c;
 }
 
 /* =========================================================
@@ -889,6 +806,7 @@ input.name:focus {
   min-height: 150px;
 
   display: flex;
+
   flex-direction: column;
 
   align-items: center;
@@ -930,6 +848,7 @@ input.name:focus {
   width: 100%;
 
   border: 0;
+
   border-radius: 8px;
 
   padding: 12px 14px;
@@ -974,6 +893,7 @@ input.name:focus {
   margin-top: 9px;
 
   display: flex;
+
   align-items: center;
   justify-content: space-between;
 
@@ -1019,6 +939,7 @@ input.name:focus {
   width: 100%;
 
   border: 0;
+
   border-radius: 10px;
 
   padding: 14px 16px;
@@ -1033,6 +954,7 @@ input.name:focus {
 
 .primary {
   background: #5865f2;
+
   color: white;
 }
 
@@ -1042,6 +964,7 @@ input.name:focus {
 
 .secondary {
   background: #2b2d31;
+
   color: white;
 }
 
@@ -1083,7 +1006,8 @@ input.name:focus {
 @media (max-width: 900px) {
 
   .broadcast-layout {
-    grid-template-columns: 1fr;
+    grid-template-columns:
+      1fr;
   }
 
   .main-stage {
@@ -1093,7 +1017,8 @@ input.name:focus {
   .streams-sidebar {
     border-left: 0;
 
-    border-top: 1px solid #292b30;
+    border-top:
+      1px solid #292b30;
   }
 
   .stream-list {
@@ -1142,6 +1067,10 @@ input.name:focus {
     padding: 28px 22px;
   }
 
+  .name-input {
+    height: 46px;
+  }
+
   .room-bar {
     padding: 10px 12px;
 
@@ -1153,13 +1082,15 @@ input.name:focus {
   .room-info {
     width: 100%;
 
-    justify-content: space-between;
+    justify-content:
+      space-between;
   }
 
   .room-actions {
     width: 100%;
 
-    justify-content: space-between;
+    justify-content:
+      space-between;
   }
 
   .server-status {
@@ -1201,15 +1132,11 @@ input.name:focus {
   }
 
   .join-box {
-    grid-template-columns: 1fr;
+    grid-template-columns:
+      1fr;
   }
 
   .join-box button {
-    min-height: 44px;
-  }
-
-  .name-input,
-  input.name {
     min-height: 44px;
   }
 }
@@ -1221,7 +1148,8 @@ input.name:focus {
 @media (max-width: 400px) {
 
   .stream-list {
-    grid-template-columns: 1fr;
+    grid-template-columns:
+      1fr;
   }
 
   .room-info {
