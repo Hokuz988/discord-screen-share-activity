@@ -151,15 +151,6 @@ function App() {
     setSelectedProducer
   ] = useState("local");
 
-  /*
-   * Guarda se o áudio de cada transmissão
-   * está habilitado no vídeo principal.
-   */
-  const [
-    audioStates,
-    setAudioStates
-  ] = useState({});
-
   const [
     streamVersion,
     setStreamVersion
@@ -213,20 +204,6 @@ function App() {
    */
   const creatingProducerPeers =
     useRef(new Set());
-
-  /*
-   * Guarda o volume escolhido pelo usuário
-   * para cada transmissão.
-   */
-  const volumeStates =
-    useRef(new Map());
-
-  /*
-   * Guarda o estado de mute de cada
-   * transmissão no vídeo principal.
-   */
-  const muteStates =
-    useRef(new Map());
 
   const roomId =
     useRef("");
@@ -292,7 +269,8 @@ function App() {
 
   function registerVideo(
     producerId,
-    element
+    element,
+    isThumbnail = false
   ) {
     if (!element) {
       return;
@@ -314,26 +292,42 @@ function App() {
 
     set.add(element);
 
-    element.autoplay =
-      true;
-
-    element.playsInline =
-      true;
+    element.autoplay = true;
+    element.playsInline = true;
 
     /*
-     * =====================================================
-     * MINIATURAS
-     * =====================================================
+     * MINIATURAS:
      *
-     * Toda miniatura é SEMPRE muda.
-     *
-     * O áudio só existe no vídeo principal.
+     * Sempre sem áudio.
      */
-    element.muted =
-      true;
+    if (isThumbnail) {
+      element.muted = true;
+    }
 
-    element.volume =
-      0;
+    /*
+     * TRANSMISSÃO LOCAL:
+     *
+     * Quem transmite nunca escuta
+     * a própria transmissão.
+     */
+    else if (
+      producerId === "local"
+    ) {
+      element.muted = true;
+    }
+
+    /*
+     * VÍDEO PRINCIPAL REMOTO:
+     *
+     * Não forçamos muted aqui.
+     * O usuário controla o áudio
+     * pelos controles nativos do vídeo.
+     */
+    else {
+      element.muted = false;
+    }
+
+    element.volume = 1;
 
     const stream =
       streams.current.get(
@@ -353,7 +347,10 @@ function App() {
           .then(() => {
             console.log(
               "[VIDEO] PLAY OK:",
-              producerId
+              producerId,
+              isThumbnail
+                ? "(miniatura)"
+                : "(principal)"
             );
           })
           .catch(error => {
@@ -373,167 +370,6 @@ function App() {
       element.onloadedmetadata =
         playVideo;
     }
-  }
-
-  /* =======================================================
-     REGISTER MAIN VIDEO
-  ======================================================= */
-
-  function registerMainVideo(
-    producerId,
-    element
-  ) {
-    if (!element) {
-      return;
-    }
-
-    let set =
-      videoRefs.current.get(
-        producerId
-      );
-
-    if (!set) {
-      set = new Set();
-
-      videoRefs.current.set(
-        producerId,
-        set
-      );
-    }
-
-    set.add(element);
-
-    element.autoplay =
-      true;
-
-    element.playsInline =
-      true;
-
-    /*
-     * =====================================================
-     * VÍDEO PRINCIPAL
-     * =====================================================
-     *
-     * O áudio é controlado normalmente
-     * pelo próprio controle do vídeo.
-     */
-
-    if (producerId === "local") {
-      /*
-       * Quem transmite nunca escuta
-       * a própria transmissão.
-       */
-      element.muted =
-        true;
-
-      element.volume =
-        0;
-
-    } else {
-
-      const savedVolume =
-        volumeStates.current.get(
-          producerId
-        );
-
-      const savedMuted =
-        muteStates.current.get(
-          producerId
-        );
-
-      element.volume =
-        typeof savedVolume === "number"
-          ? savedVolume
-          : 1;
-
-      element.muted =
-        typeof savedMuted === "boolean"
-          ? savedMuted
-          : true;
-    }
-
-    const stream =
-      streams.current.get(
-        producerId
-      );
-
-    if (!stream) {
-      return;
-    }
-
-    element.srcObject =
-      stream;
-
-    const playVideo =
-      () => {
-        element.play()
-          .then(() => {
-            console.log(
-              "[MAIN VIDEO] PLAY OK:",
-              producerId
-            );
-          })
-          .catch(error => {
-            console.warn(
-              "[MAIN VIDEO] play bloqueado:",
-              producerId,
-              error
-            );
-          });
-      };
-
-    if (
-      element.readyState >= 2
-    ) {
-      playVideo();
-    } else {
-      element.onloadedmetadata =
-        playVideo;
-    }
-
-    /*
-     * Guarda alterações feitas
-     * diretamente nos controles nativos.
-     */
-    element.onvolumechange =
-      () => {
-
-        if (
-          producerId ===
-          "local"
-        ) {
-          /*
-           * Sempre força o local
-           * a permanecer sem áudio.
-           */
-          element.muted =
-            true;
-
-          element.volume =
-            0;
-
-          return;
-        }
-
-        volumeStates.current.set(
-          producerId,
-          element.volume
-        );
-
-        muteStates.current.set(
-          producerId,
-          element.muted
-        );
-
-        setAudioStates(
-          current => ({
-            ...current,
-            [producerId]:
-              !element.muted &&
-              element.volume > 0
-          })
-        );
-      };
   }
 
   /* =======================================================
@@ -585,7 +421,6 @@ function App() {
 
     const attach =
       () => {
-
         const videos =
           videoRefs.current.get(
             producerId
@@ -602,7 +437,6 @@ function App() {
           const video
           of videos
         ) {
-
           if (!video) {
             continue;
           }
@@ -617,80 +451,73 @@ function App() {
             true;
 
           /*
-           * =================================================
-           * IMPORTANTE
-           * =================================================
+           * Detecta se o vídeo é
+           * uma miniatura.
            *
-           * Aqui NÃO usamos audioStates
-           * para as miniaturas.
-           *
-           * Todas ficam SEMPRE mudas.
+           * Miniaturas normalmente
+           * possuem a classe thumb-video
+           * no elemento pai.
            */
+          const isThumbnail =
+            video.closest(
+              ".thumb-video"
+            ) !== null;
 
-          const isMainVideo =
-            video.controls === true;
+          /*
+           * Miniatura SEMPRE muda.
+           */
+          if (isThumbnail) {
+            video.muted = true;
+          }
 
+          /*
+           * Transmissão própria SEMPRE muda.
+           */
+          else if (
+            producerId === "local"
+          ) {
+            video.muted = true;
+          }
+
+          /*
+           * Vídeo principal remoto:
+           * NÃO forçar mute.
+           */
+          else {
+            /*
+             * Só definimos muted como false
+             * se ele ainda não estiver
+             * sendo controlado pelo usuário.
+             */
+            if (
+              video.dataset.userAudioControl !==
+              "true"
+            ) {
+              video.muted = false;
+            }
+          }
+
+          /*
+           * Não mexemos no volume do
+           * vídeo principal depois que
+           * ele já estiver sendo usado.
+           */
           if (
-            producerId ===
-            "local"
+            !video.dataset.userAudioControl
           ) {
-
-            video.muted =
-              true;
-
-            video.volume =
-              0;
-
-          } else if (
-            isMainVideo
-          ) {
-
-            /*
-             * Vídeo principal:
-             * restaura as preferências.
-             */
-
-            const savedVolume =
-              volumeStates.current.get(
-                producerId
-              );
-
-            const savedMuted =
-              muteStates.current.get(
-                producerId
-              );
-
-            video.volume =
-              typeof savedVolume === "number"
-                ? savedVolume
-                : 1;
-
-            video.muted =
-              typeof savedMuted === "boolean"
-                ? savedMuted
-                : true;
-
-          } else {
-
-            /*
-             * MINIATURA:
-             * SEMPRE MUDA.
-             */
-            video.muted =
-              true;
-
-            video.volume =
-              0;
+            video.volume = 1;
           }
 
           const playVideo =
             () => {
-
               video.play()
                 .then(() => {
                   console.log(
                     "[VIDEO] PLAY OK:",
-                    producerId
+                    producerId,
+                    isThumbnail
+                      ? "(miniatura)"
+                      : "(principal)"
                   );
                 })
                 .catch(error => {
@@ -751,7 +578,6 @@ function App() {
       const video
       of videos
     ) {
-
       try {
         video.pause();
         video.srcObject = null;
@@ -766,7 +592,6 @@ function App() {
   async function createPeer(
     key
   ) {
-
     const iceServers =
       await getIceServers();
 
@@ -803,30 +628,18 @@ function App() {
   function closePeer(
     key
   ) {
-
     const pc =
       peerConnections.current.get(
         key
       );
 
     if (pc) {
-
       try {
-
-        pc.onicecandidate =
-          null;
-
-        pc.ontrack =
-          null;
-
-        pc.onconnectionstatechange =
-          null;
-
-        pc.oniceconnectionstatechange =
-          null;
-
+        pc.onicecandidate = null;
+        pc.ontrack = null;
+        pc.onconnectionstatechange = null;
+        pc.oniceconnectionstatechange = null;
         pc.close();
-
       } catch {}
     }
 
@@ -846,7 +659,6 @@ function App() {
   function requestOffer(
     producerId
   ) {
-
     if (!producerId) {
       return;
     }
@@ -894,7 +706,6 @@ function App() {
   async function createProducerPeer(
     viewerId
   ) {
-
     if (
       !viewerId ||
       !localStream.current
@@ -917,7 +728,6 @@ function App() {
         viewerId
       )
     ) {
-
       console.log(
         "[PRODUCER] negociação já em andamento:",
         viewerId
@@ -932,14 +742,12 @@ function App() {
       );
 
     if (existing) {
-
       if (
         existing.connectionState !==
           "failed" &&
         existing.connectionState !==
           "closed"
       ) {
-
         console.log(
           "[PRODUCER] peer já existe:",
           key,
@@ -957,7 +765,6 @@ function App() {
     );
 
     try {
-
       console.log(
         "[PRODUCER] criando peer:",
         key
@@ -973,16 +780,12 @@ function App() {
         const track
         of tracks
       ) {
-
         try {
-
           pc.addTrack(
             track,
             localStream.current
           );
-
         } catch (error) {
-
           console.error(
             "[PRODUCER] addTrack:",
             error
@@ -992,7 +795,6 @@ function App() {
 
       pc.onicecandidate =
         event => {
-
           if (!event.candidate) {
             return;
           }
@@ -1023,7 +825,6 @@ function App() {
 
       pc.oniceconnectionstatechange =
         () => {
-
           console.log(
             "[PRODUCER] ICE connection:",
             viewerId,
@@ -1034,7 +835,6 @@ function App() {
             pc.iceConnectionState ===
             "failed"
           ) {
-
             console.warn(
               "[PRODUCER] ICE falhou:",
               viewerId
@@ -1043,12 +843,10 @@ function App() {
             closePeer(key);
 
             setTimeout(() => {
-
               if (
                 localStream.current &&
                 roomId.current
               ) {
-
                 creatingProducerPeers.current.delete(
                   viewerId
                 );
@@ -1061,14 +859,12 @@ function App() {
                     myId.current
                 });
               }
-
             }, 1000);
           }
         };
 
       pc.onconnectionstatechange =
         () => {
-
           console.log(
             "[PRODUCER]",
             viewerId,
@@ -1080,7 +876,6 @@ function App() {
             pc.connectionState ===
             "connected"
           ) {
-
             console.log(
               "[PRODUCER] conexão estabelecida:",
               viewerId
@@ -1093,7 +888,6 @@ function App() {
             pc.connectionState ===
               "closed"
           ) {
-
             console.warn(
               "[PRODUCER] conexão falhou:",
               viewerId
@@ -1151,7 +945,6 @@ function App() {
       });
 
     } catch (error) {
-
       console.error(
         "[PRODUCER] erro ao criar offer:",
         viewerId,
@@ -1161,7 +954,6 @@ function App() {
       closePeer(key);
 
     } finally {
-
       creatingProducerPeers.current.delete(
         viewerId
       );
@@ -1175,10 +967,8 @@ function App() {
   function waitForIceGatheringComplete(
     pc
   ) {
-
     return new Promise(
       resolve => {
-
         if (
           pc.iceGatheringState ===
           "complete"
@@ -1197,12 +987,10 @@ function App() {
 
         const check =
           () => {
-
             if (
               pc.iceGatheringState ===
               "complete"
             ) {
-
               clearTimeout(
                 timeout
               );
@@ -1231,7 +1019,6 @@ function App() {
   async function handleOffer(
     msg
   ) {
-
     const producerId =
       String(
         msg.producerId ||
@@ -1251,7 +1038,6 @@ function App() {
       !producerFrom ||
       !msg.offer
     ) {
-
       console.warn(
         "[VIEWER] offer inválida:",
         msg
@@ -1281,14 +1067,12 @@ function App() {
       );
 
     if (existing) {
-
       if (
         existing.connectionState !==
           "failed" &&
         existing.connectionState !==
           "closed"
       ) {
-
         console.log(
           "[VIEWER] peer já existe:",
           key,
@@ -1302,13 +1086,11 @@ function App() {
     }
 
     try {
-
       const pc =
         await createPeer(key);
 
       pc.ontrack =
         event => {
-
           console.log(
             "[VIEWER] TRACK:",
             producerId,
@@ -1320,7 +1102,6 @@ function App() {
             event.streams?.[0];
 
           if (!stream) {
-
             stream =
               streams.current.get(
                 producerId
@@ -1341,7 +1122,6 @@ function App() {
                 );
 
             if (!exists) {
-
               stream.addTrack(
                 event.track
               );
@@ -1376,7 +1156,6 @@ function App() {
 
           setProducers(
             current => {
-
               if (
                 current.includes(
                   producerId
@@ -1402,7 +1181,6 @@ function App() {
 
       pc.onicecandidate =
         event => {
-
           if (!event.candidate) {
             return;
           }
@@ -1432,7 +1210,6 @@ function App() {
 
       pc.oniceconnectionstatechange =
         () => {
-
           console.log(
             "[VIEWER] ICE:",
             producerId,
@@ -1445,7 +1222,6 @@ function App() {
             pc.iceConnectionState ===
               "completed"
           ) {
-
             setStatus(
               "Transmissão conectada"
             );
@@ -1455,7 +1231,6 @@ function App() {
             pc.iceConnectionState ===
             "failed"
           ) {
-
             console.warn(
               "[VIEWER] ICE falhou:",
               producerId
@@ -1465,7 +1240,6 @@ function App() {
 
       pc.onconnectionstatechange =
         () => {
-
           console.log(
             "[VIEWER]",
             producerId,
@@ -1477,7 +1251,6 @@ function App() {
             pc.connectionState ===
             "connected"
           ) {
-
             setStatus(
               "Transmissão conectada"
             );
@@ -1488,7 +1261,6 @@ function App() {
               );
 
             if (stream) {
-
               attachStream(
                 producerId,
                 stream
@@ -1502,7 +1274,6 @@ function App() {
             pc.connectionState ===
               "closed"
           ) {
-
             console.warn(
               "[VIEWER] conexão encerrada:",
               producerId
@@ -1537,7 +1308,6 @@ function App() {
       if (
         !pc.localDescription
       ) {
-
         throw new Error(
           "localDescription do viewer não criada."
         );
@@ -1562,7 +1332,6 @@ function App() {
       });
 
     } catch (error) {
-
       console.error(
         "[VIEWER] erro ao processar offer:",
         producerId,
@@ -1580,7 +1349,6 @@ function App() {
   async function handleAnswer(
     msg
   ) {
-
     const viewerId =
       String(
         msg.from ||
@@ -1600,7 +1368,6 @@ function App() {
       );
 
     if (!pc) {
-
       console.warn(
         "[PRODUCER] peer não encontrado:",
         key
@@ -1610,12 +1377,10 @@ function App() {
     }
 
     try {
-
       if (
         pc.signalingState !==
         "have-local-offer"
       ) {
-
         console.warn(
           "[PRODUCER] estado inesperado:",
           pc.signalingState
@@ -1638,7 +1403,6 @@ function App() {
       );
 
     } catch (error) {
-
       console.error(
         "[PRODUCER] erro answer:",
         viewerId,
@@ -1654,7 +1418,6 @@ function App() {
   async function handleIce(
     msg
   ) {
-
     if (!msg.candidate) {
       return;
     }
@@ -1675,7 +1438,6 @@ function App() {
       !producerId ||
       !from
     ) {
-
       console.warn(
         "[ICE] mensagem incompleta:",
         msg
@@ -1690,12 +1452,9 @@ function App() {
       producerId ===
       myId.current
     ) {
-
       key =
         `local->${from}`;
-
     } else {
-
       key =
         `${producerId}->local`;
     }
@@ -1706,7 +1465,6 @@ function App() {
       );
 
     if (!pc) {
-
       console.log(
         "[ICE] peer ainda não existe, enfileirando:",
         key
@@ -1717,7 +1475,6 @@ function App() {
           key
         )
       ) {
-
         pendingCandidates.current.set(
           key,
           []
@@ -1736,7 +1493,6 @@ function App() {
     if (
       !pc.remoteDescription
     ) {
-
       console.log(
         "[ICE] aguardando remoteDescription:",
         key
@@ -1747,7 +1503,6 @@ function App() {
           key
         )
       ) {
-
         pendingCandidates.current.set(
           key,
           []
@@ -1764,7 +1519,6 @@ function App() {
     }
 
     try {
-
       await pc.addIceCandidate(
         msg.candidate
       );
@@ -1775,7 +1529,6 @@ function App() {
       );
 
     } catch (error) {
-
       console.warn(
         "[ICE] erro ao adicionar:",
         key,
@@ -1791,7 +1544,6 @@ function App() {
   async function flushPendingCandidates(
     key
   ) {
-
     const pc =
       peerConnections.current.get(
         key
@@ -1832,9 +1584,7 @@ function App() {
       const candidate
       of list
     ) {
-
       try {
-
         await pc.addIceCandidate(
           candidate
         );
@@ -1845,7 +1595,6 @@ function App() {
         );
 
       } catch (error) {
-
         console.warn(
           "[ICE] candidato pendente falhou:",
           key,
@@ -1862,7 +1611,6 @@ function App() {
   function removeRemoteProducer(
     producerId
   ) {
-
     if (!producerId) {
       return;
     }
@@ -1893,14 +1641,6 @@ function App() {
       producerId
     );
 
-    volumeStates.current.delete(
-      producerId
-    );
-
-    muteStates.current.delete(
-      producerId
-    );
-
     setProducers(
       current =>
         current.filter(
@@ -1910,24 +1650,8 @@ function App() {
         )
     );
 
-    setAudioStates(
-      current => {
-
-        const next = {
-          ...current
-        };
-
-        delete next[
-          producerId
-        ];
-
-        return next;
-      }
-    );
-
     setSelectedProducer(
       current => {
-
         if (
           current !==
           producerId
@@ -1950,11 +1674,9 @@ function App() {
   ======================================================= */
 
   async function startSharing() {
-
     setError("");
 
     if (!inRoom) {
-
       setError(
         "Entre em uma sala primeiro."
       );
@@ -1970,7 +1692,6 @@ function App() {
       producers.length >=
       MAX_PRODUCERS
     ) {
-
       setError(
         `A sala já possui ${MAX_PRODUCERS} transmissões ativas.`
       );
@@ -1979,7 +1700,6 @@ function App() {
     }
 
     try {
-
       console.log(
         "[SCREEN] solicitando captura..."
       );
@@ -1987,7 +1707,6 @@ function App() {
       const stream =
         await navigator.mediaDevices
           .getDisplayMedia({
-
             video: {
               frameRate: {
                 ideal: 30,
@@ -2019,16 +1738,6 @@ function App() {
         stream
       );
 
-      /*
-       * Local sempre sem áudio.
-       */
-      setAudioStates(
-        current => ({
-          ...current,
-          local: false
-        })
-      );
-
       setSharing(true);
 
       setSelectedProducer(
@@ -2042,12 +1751,10 @@ function App() {
         });
 
       if (!sent) {
-
         stream
           .getTracks()
           .forEach(
             track => {
-
               try {
                 track.stop();
               } catch {}
@@ -2078,10 +1785,8 @@ function App() {
         stream.getVideoTracks()[0];
 
       if (videoTrack) {
-
         videoTrack.onended =
           () => {
-
             console.log(
               "[SCREEN] captura encerrada."
             );
@@ -2101,7 +1806,6 @@ function App() {
       );
 
     } catch (error) {
-
       console.error(
         "[SCREEN] erro:",
         error
@@ -2125,7 +1829,6 @@ function App() {
   ======================================================= */
 
   function stopSharing() {
-
     if (
       !localStream.current &&
       !sharing
@@ -2143,7 +1846,6 @@ function App() {
         WebSocket.OPEN &&
       roomId.current
     ) {
-
       send({
         type:
           "stop-sharing"
@@ -2156,7 +1858,6 @@ function App() {
       ]
       of peerConnections.current
     ) {
-
       if (
         key.startsWith(
           "local->"
@@ -2171,12 +1872,10 @@ function App() {
     if (
       localStream.current
     ) {
-
       localStream.current
         .getTracks()
         .forEach(
           track => {
-
             try {
               track.stop();
             } catch {}
@@ -2197,27 +1896,12 @@ function App() {
 
     setSharing(false);
 
-    setAudioStates(
-      current => {
-
-        const next = {
-          ...current
-        };
-
-        delete next.local;
-
-        return next;
-      }
-    );
-
     setSelectedProducer(
       current => {
-
         if (
           current ===
           "local"
         ) {
-
           return (
             producers[0] ||
             "local"
@@ -2243,7 +1927,6 @@ function App() {
   ======================================================= */
 
   function createRoom() {
-
     setError("");
 
     send({
@@ -2257,7 +1940,6 @@ function App() {
   ======================================================= */
 
   function joinRoom() {
-
     setError("");
 
     const code =
@@ -2266,7 +1948,6 @@ function App() {
         .toUpperCase();
 
     if (!code) {
-
       setError(
         "Digite o código da sala."
       );
@@ -2288,13 +1969,11 @@ function App() {
   ======================================================= */
 
   function leaveRoom() {
-
     if (
       ws.current &&
       ws.current.readyState ===
       WebSocket.OPEN
     ) {
-
       send({
         type:
           "leave-room"
@@ -2322,103 +2001,18 @@ function App() {
   }
 
   /* =======================================================
-     AUDIO BUTTON
-  ======================================================= */
-
-  function toggleAudio(
-    producerId
-  ) {
-
-    if (
-      producerId ===
-      "local"
-    ) {
-      return;
-    }
-
-    const videos =
-      videoRefs.current.get(
-        producerId
-      );
-
-    if (!videos) {
-      return;
-    }
-
-    /*
-     * Procura especificamente o vídeo
-     * principal, que possui controls=true.
-     */
-    let mainVideo = null;
-
-    for (
-      const video
-      of videos
-    ) {
-
-      if (
-        video &&
-        video.controls
-      ) {
-        mainVideo =
-          video;
-
-        break;
-      }
-    }
-
-    if (!mainVideo) {
-      return;
-    }
-
-    mainVideo.muted =
-      !mainVideo.muted;
-
-    muteStates.current.set(
-      producerId,
-      mainVideo.muted
-    );
-
-    volumeStates.current.set(
-      producerId,
-      mainVideo.volume
-    );
-
-    setAudioStates(
-      current => ({
-        ...current,
-        [producerId]:
-          !mainVideo.muted &&
-          mainVideo.volume > 0
-      })
-    );
-
-    if (
-      !mainVideo.muted
-    ) {
-
-      mainVideo.play()
-        .catch(
-          () => {}
-        );
-    }
-  }
-
-  /* =======================================================
      SELECT PRODUCER
   ======================================================= */
 
   function selectProducer(
     producerId
   ) {
-
     setSelectedProducer(
       producerId
     );
 
     setTimeout(
       () => {
-
         const stream =
           streams.current.get(
             producerId
@@ -2446,12 +2040,10 @@ function App() {
     if (
       localStream.current
     ) {
-
       localStream.current
         .getTracks()
         .forEach(
           track => {
-
             try {
               track.stop();
             } catch {}
@@ -2468,7 +2060,6 @@ function App() {
       ]
       of peerConnections.current
     ) {
-
       closePeer(key);
     }
 
@@ -2476,12 +2067,10 @@ function App() {
       const stream
       of streams.current.values()
     ) {
-
       stream
         .getTracks()
         .forEach(
           track => {
-
             try {
               track.stop();
             } catch {}
@@ -2501,12 +2090,10 @@ function App() {
       const videos
       of videoRefs.current.values()
     ) {
-
       for (
         const video
         of videos
       ) {
-
         try {
           video.pause();
           video.srcObject = null;
@@ -2515,10 +2102,6 @@ function App() {
     }
 
     videoRefs.current.clear();
-
-    volumeStates.current.clear();
-
-    muteStates.current.clear();
 
     setStreamVersion(
       version =>
@@ -2531,7 +2114,6 @@ function App() {
   ======================================================= */
 
   function cleanupAll() {
-
     cleanupStreams();
 
     roomId.current =
@@ -2550,13 +2132,10 @@ function App() {
   ======================================================= */
 
   useEffect(() => {
-
     let alive = true;
 
     async function setup() {
-
       if (!CLIENT_ID) {
-
         setStatus(
           "Modo navegador"
         );
@@ -2567,7 +2146,6 @@ function App() {
       }
 
       try {
-
         discordSdk =
           new DiscordSDK(
             CLIENT_ID
@@ -2588,7 +2166,6 @@ function App() {
         );
 
       } catch (error) {
-
         console.warn(
           "[DISCORD]",
           error
@@ -2605,19 +2182,16 @@ function App() {
     setup();
 
     return () => {
-
       alive = false;
 
       cleanupAll();
 
       if (ws.current) {
-
         try {
           ws.current.close();
         } catch {}
       }
     };
-
   }, []);
 
   /* =======================================================
@@ -2625,7 +2199,6 @@ function App() {
   ======================================================= */
 
   function connectSignal() {
-
     if (
       ws.current &&
       (
@@ -2644,7 +2217,6 @@ function App() {
     );
 
     try {
-
       const socket =
         new WebSocket(
           SIGNALING_URL
@@ -2655,7 +2227,6 @@ function App() {
 
       socket.onopen =
         () => {
-
           console.log(
             "[WS] conectado"
           );
@@ -2669,18 +2240,14 @@ function App() {
 
       socket.onmessage =
         async event => {
-
           let msg;
 
           try {
-
             msg =
               JSON.parse(
                 event.data
               );
-
           } catch {
-
             console.error(
               "[WS] JSON inválido"
             );
@@ -2693,15 +2260,10 @@ function App() {
             msg
           );
 
-          /* ================================================
-             CLIENT ID
-          ================================================ */
-
           if (
             msg.type ===
             "client-id"
           ) {
-
             myId.current =
               String(
                 msg.id || ""
@@ -2715,15 +2277,10 @@ function App() {
             return;
           }
 
-          /* ================================================
-             ROOM CREATED
-          ================================================ */
-
           if (
             msg.type ===
             "room-created"
           ) {
-
             const code =
               String(
                 msg.roomId || ""
@@ -2755,15 +2312,10 @@ function App() {
             return;
           }
 
-          /* ================================================
-             ROOM JOINED
-          ================================================ */
-
           if (
             msg.type ===
             "room-joined"
           ) {
-
             const code =
               String(
                 msg.roomId || ""
@@ -2795,15 +2347,10 @@ function App() {
             return;
           }
 
-          /* ================================================
-             PRODUCER LIST
-          ================================================ */
-
           if (
             msg.type ===
             "producer-list"
           ) {
-
             const list =
               Array.isArray(
                 msg.producers
@@ -2839,7 +2386,6 @@ function App() {
 
             setSelectedProducer(
               current => {
-
                 if (
                   current ===
                   "local"
@@ -2866,7 +2412,6 @@ function App() {
               const producerId
               of remote
             ) {
-
               requestOffer(
                 producerId
               );
@@ -2875,15 +2420,10 @@ function App() {
             return;
           }
 
-          /* ================================================
-             NEW PRODUCER
-          ================================================ */
-
           if (
             msg.type ===
             "producer"
           ) {
-
             const producerId =
               String(
                 msg.producerId ||
@@ -2903,7 +2443,6 @@ function App() {
 
             setProducers(
               current => {
-
                 if (
                   current.includes(
                     producerId
@@ -2933,15 +2472,10 @@ function App() {
             return;
           }
 
-          /* ================================================
-             PRODUCER LEFT
-          ================================================ */
-
           if (
             msg.type ===
             "producer-left"
           ) {
-
             removeRemoteProducer(
               String(
                 msg.producerId ||
@@ -2952,15 +2486,10 @@ function App() {
             return;
           }
 
-          /* ================================================
-             VIEWER COUNT
-          ================================================ */
-
           if (
             msg.type ===
             "viewer-count"
           ) {
-
             setViewerCount(
               Number(
                 msg.count || 0
@@ -2970,15 +2499,10 @@ function App() {
             return;
           }
 
-          /* ================================================
-             SERVER ERROR
-          ================================================ */
-
           if (
             msg.type ===
             "error"
           ) {
-
             console.error(
               "[SERVER ERROR]",
               msg.message
@@ -2992,15 +2516,10 @@ function App() {
             return;
           }
 
-          /* ================================================
-             REQUEST OFFER
-          ================================================ */
-
           if (
             msg.type ===
             "request-offer"
           ) {
-
             const viewerId =
               String(
                 msg.viewerId ||
@@ -3011,7 +2530,6 @@ function App() {
               localStream.current &&
               viewerId
             ) {
-
               await createProducerPeer(
                 viewerId
               );
@@ -3020,15 +2538,10 @@ function App() {
             return;
           }
 
-          /* ================================================
-             OFFER
-          ================================================ */
-
           if (
             msg.type ===
             "offer"
           ) {
-
             await handleOffer(
               msg
             );
@@ -3036,15 +2549,10 @@ function App() {
             return;
           }
 
-          /* ================================================
-             ANSWER
-          ================================================ */
-
           if (
             msg.type ===
             "answer"
           ) {
-
             await handleAnswer(
               msg
             );
@@ -3052,15 +2560,10 @@ function App() {
             return;
           }
 
-          /* ================================================
-             ICE
-          ================================================ */
-
           if (
             msg.type ===
             "ice"
           ) {
-
             await handleIce(
               msg
             );
@@ -3071,7 +2574,6 @@ function App() {
 
       socket.onerror =
         error => {
-
           console.error(
             "[WS ERROR]",
             error
@@ -3084,7 +2586,6 @@ function App() {
 
       socket.onclose =
         () => {
-
           console.warn(
             "[WS] fechado"
           );
@@ -3095,7 +2596,6 @@ function App() {
         };
 
     } catch (error) {
-
       console.error(
         "[WS]",
         error
@@ -3118,7 +2618,6 @@ function App() {
         : []),
 
       ...producers
-
     ].slice(
       0,
       MAX_PRODUCERS
@@ -3178,11 +2677,9 @@ function App() {
           </button>
 
           <div className="divider">
-
             <span>
               ou
             </span>
-
           </div>
 
           <div className="join-box">
@@ -3199,7 +2696,6 @@ function App() {
               }
               onKeyDown={
                 event => {
-
                   if (
                     event.key ===
                     "Enter"
@@ -3318,23 +2814,14 @@ function App() {
 
                     sharing ? (
 
-                      /*
-                       * =================================================
-                       * SUA PRÓPRIA TRANSMISSÃO
-                       * =================================================
-                       *
-                       * Sempre sem áudio.
-                       */
-
                       <video
                         ref={
                           element => {
-
                             if (element) {
-
-                              registerMainVideo(
+                              registerVideo(
                                 "local",
-                                element
+                                element,
+                                false
                               );
                             }
                           }
@@ -3342,7 +2829,6 @@ function App() {
                         autoPlay
                         muted
                         playsInline
-                        controls
                       />
 
                     ) : (
@@ -3358,34 +2844,29 @@ function App() {
                         </h2>
 
                       </div>
+
                     )
 
                   ) : (
 
-                    /*
-                     * =================================================
-                     * VÍDEO PRINCIPAL DE OUTRA PESSOA
-                     * =================================================
-                     *
-                     * Controles nativos permitem:
-                     *
-                     * - volume
-                     * - mute
-                     * - barra de progresso/controles
-                     *
-                     * O botão customizado de áudio também
-                     * pode mutar/desmutar.
-                     */
-
                     <video
                       ref={
                         element => {
-
                           if (element) {
 
-                            registerMainVideo(
+                            /*
+                             * Marca que esse
+                             * elemento possui
+                             * controles de áudio
+                             * próprios.
+                             */
+                            element.dataset.userAudioControl =
+                              "true";
+
+                            registerVideo(
                               mainProducer,
-                              element
+                              element,
+                              false
                             );
                           }
                         }
@@ -3407,29 +2888,6 @@ function App() {
                         : "Transmissão ao vivo"}
 
                     </div>
-
-                    {mainProducer !==
-                      "local" && (
-
-                      <button
-                        className="audio-button"
-                        onClick={
-                          () =>
-                            toggleAudio(
-                              mainProducer
-                            )
-                        }
-                      >
-                        {
-                          audioStates[
-                            mainProducer
-                          ]
-                            ? "🔊"
-                            : "🔇"
-                        }
-                      </button>
-
-                    )}
 
                   </div>
 
@@ -3512,32 +2970,20 @@ function App() {
 
                         <div className="thumb-video">
 
-                          {/*
-                           * =================================================
-                           * MINIATURA
-                           * =================================================
-                           *
-                           * SEMPRE MUD A.
-                           *
-                           * Não importa se o áudio da transmissão
-                           * está ligado no vídeo principal.
-                           */}
-
                           <video
                             ref={
                               element => {
-
                                 if (element) {
-
                                   registerVideo(
                                     producerId,
-                                    element
+                                    element,
+                                    true
                                   );
                                 }
                               }
                             }
                             autoPlay
-                            muted={true}
+                            muted
                             playsInline
                           />
 
@@ -3651,7 +3097,6 @@ const root =
   );
 
 if (!root) {
-
   throw new Error(
     "Elemento #root não encontrado."
   );
