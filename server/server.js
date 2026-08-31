@@ -37,10 +37,6 @@ const PORT =
 
 const MAX_PRODUCERS = 3;
 
-/* =========================================================
-   CONSTANTS
-========================================================= */
-
 const WS_OPEN = 1;
 
 /* =========================================================
@@ -180,9 +176,7 @@ function broadcast(
   }
 
   for (const client of room.clients) {
-    if (
-      client === except
-    ) {
+    if (client === except) {
       continue;
     }
 
@@ -354,9 +348,6 @@ function removeProducer(ws) {
 
   ws.isProducer = false;
 
-  /*
-   * Avisa todos os viewers que a transmissão acabou.
-   */
   broadcast(
     room,
     {
@@ -385,36 +376,21 @@ function leaveRoom(ws) {
     `[ROOM] ${ws.id} saindo de ${room.id}`
   );
 
-  /*
-   * Primeiro remove o producer,
-   * caso ele esteja transmitindo.
-   */
   if (
     room.producers.has(ws.id)
   ) {
     removeProducer(ws);
   }
 
-  /*
-   * Remove o cliente da sala.
-   */
   room.clients.delete(ws);
 
   ws.room = null;
   ws.isProducer = false;
 
-  /*
-   * Se ainda existem clientes,
-   * atualiza o estado.
-   */
   if (room.clients.size > 0) {
     updateProducerList(room);
     updateViewerCount(room);
-
   } else {
-    /*
-     * Sala vazia.
-     */
     rooms.delete(room.id);
 
     console.log(
@@ -495,7 +471,6 @@ wss.on(
             JSON.parse(
               raw.toString()
             );
-
         } catch {
           console.warn(
             `[MESSAGE] JSON inválido de ${ws.id}`
@@ -523,10 +498,6 @@ wss.on(
           msg.type ===
           "create-room"
         ) {
-          /*
-           * Se já estava em uma sala,
-           * sai primeiro.
-           */
           if (ws.room) {
             leaveRoom(ws);
           }
@@ -688,10 +659,6 @@ wss.on(
             }
           );
 
-          /*
-           * Avisa os outros clientes
-           * que a lista mudou.
-           */
           broadcast(
             room,
             {
@@ -760,24 +727,14 @@ wss.on(
             return;
           }
 
-          /*
-           * Já está transmitindo.
-           */
           if (
             room.producers.has(
               ws.id
             )
           ) {
-            console.log(
-              `[PRODUCER] ${ws.id} já está transmitindo`
-            );
-
             return;
           }
 
-          /*
-           * Limite de producers.
-           */
           if (
             room.producers.size >=
             MAX_PRODUCERS
@@ -796,9 +753,6 @@ wss.on(
             return;
           }
 
-          /*
-           * Registra producer.
-           */
           room.producers.set(
             ws.id,
             ws
@@ -811,14 +765,6 @@ wss.on(
             `[PRODUCER] ${ws.id} COMEÇOU A TRANSMITIR`
           );
 
-          console.log(
-            `[PRODUCER] produtores atuais:`,
-            getProducerList(room)
-          );
-
-          /*
-           * Avisa os viewers.
-           */
           broadcast(
             room,
             {
@@ -911,16 +857,8 @@ wss.on(
               producer
             )
           ) {
-            console.warn(
-              `[SIGNAL] salas diferentes: ${ws.id} -> ${producer.id}`
-            );
-
             return;
           }
-
-          console.log(
-            `[SIGNAL] ${ws.id} pediu offer de ${producer.id}`
-          );
 
           send(
             producer,
@@ -967,25 +905,14 @@ wss.on(
             );
 
           if (!target) {
-            console.warn(
-              `[OFFER] target não encontrado: ${targetId}`
-            );
-
             return;
           }
 
-          /*
-           * Somente producers podem enviar offers.
-           */
           if (
             !room.producers.has(
               ws.id
             )
           ) {
-            console.warn(
-              `[OFFER] ${ws.id} não é producer`
-            );
-
             return;
           }
 
@@ -995,16 +922,8 @@ wss.on(
               target
             )
           ) {
-            console.warn(
-              `[OFFER] clientes não estão na mesma sala`
-            );
-
             return;
           }
-
-          console.log(
-            `[SIGNAL] OFFER ${ws.id} -> ${target.id}`
-          );
 
           send(
             target,
@@ -1057,25 +976,14 @@ wss.on(
             );
 
           if (!target) {
-            console.warn(
-              `[ANSWER] target não encontrado: ${targetId}`
-            );
-
             return;
           }
 
-          /*
-           * O answer deve ir para um producer.
-           */
           if (
             !room.producers.has(
               target.id
             )
           ) {
-            console.warn(
-              `[ANSWER] target ${target.id} não é producer`
-            );
-
             return;
           }
 
@@ -1085,16 +993,8 @@ wss.on(
               target
             )
           ) {
-            console.warn(
-              `[ANSWER] clientes não estão na mesma sala`
-            );
-
             return;
           }
-
-          console.log(
-            `[SIGNAL] ANSWER ${ws.id} -> ${target.id}`
-          );
 
           send(
             target,
@@ -1137,10 +1037,6 @@ wss.on(
             );
 
           if (!targetId) {
-            console.warn(
-              `[ICE] target ausente de ${ws.id}`
-            );
-
             return;
           }
 
@@ -1151,10 +1047,6 @@ wss.on(
             );
 
           if (!target) {
-            console.warn(
-              `[ICE] target não encontrado: ${targetId}`
-            );
-
             return;
           }
 
@@ -1164,10 +1056,6 @@ wss.on(
               target
             )
           ) {
-            console.warn(
-              `[ICE] clientes não estão na mesma sala`
-            );
-
             return;
           }
 
@@ -1177,32 +1065,17 @@ wss.on(
             );
 
           if (!producerId) {
-            console.warn(
-              `[ICE] producerId ausente`
-            );
-
             return;
           }
 
-          /*
-           * O producer precisa existir
-           * neste momento.
-           */
           if (
             !room.producers.has(
               producerId
             )
           ) {
-            console.warn(
-              `[ICE] produtor ${producerId} não está mais ativo`
-            );
-
             return;
           }
 
-          /*
-           * Repassa o candidate sem modificar.
-           */
           send(
             target,
             {
@@ -1221,10 +1094,6 @@ wss.on(
 
           return;
         }
-
-        /* =================================================
-           UNKNOWN MESSAGE
-        ================================================= */
 
         console.warn(
           `[MESSAGE] tipo desconhecido: ${msg.type}`
@@ -1269,7 +1138,7 @@ wss.on(
 );
 
 /* =========================================================
-   WEBSOCKET HEARTBEAT
+   HEARTBEAT
 ========================================================= */
 
 const heartbeatInterval =
@@ -1321,11 +1190,11 @@ server.listen(
   "0.0.0.0",
   () => {
     console.log(
-      `========================================`
+      "========================================"
     );
 
     console.log(
-      ` ScreenCast Signaling Server`
+      " ScreenCast Signaling Server"
     );
 
     console.log(
@@ -1337,7 +1206,7 @@ server.listen(
     );
 
     console.log(
-      `========================================`
+      "========================================"
     );
   }
 );

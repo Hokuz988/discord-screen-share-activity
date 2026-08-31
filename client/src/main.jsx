@@ -26,6 +26,7 @@ const SIGNALING_URL =
   "wss://screen-share-activity.onrender.com";
 
 const TURN_SERVER_URL =
+  import.meta.env.VITE_TURN_SERVER_URL ||
   "https://screen-share-activity.onrender.com";
 
 const MAX_PRODUCERS = 3;
@@ -154,10 +155,6 @@ function App() {
     setAudioStates
   ] = useState({});
 
-  /*
-   * Usado para forçar o React a reconstruir
-   * os elementos <video> quando um stream chega.
-   */
   const [
     streamVersion,
     setStreamVersion
@@ -170,38 +167,27 @@ function App() {
   const ws =
     useRef(null);
 
+  const reconnectTimer =
+    useRef(null);
+
+  const manuallyClosed =
+    useRef(false);
+
   const localStream =
     useRef(null);
 
-  /*
-   * producerId -> MediaStream
-   */
   const streams =
     useRef(new Map());
 
-  /*
-   * producerId -> Set<HTMLVideoElement>
-   */
   const videoRefs =
     useRef(new Map());
 
-  /*
-   * local->viewer
-   * producer->local
-   */
   const peerConnections =
     useRef(new Map());
 
-  /*
-   * peerKey -> ICE[]
-   */
   const pendingCandidates =
     useRef(new Map());
 
-  /*
-   * Produtores que já receberam
-   * request-offer.
-   */
   const requestedOffers =
     useRef(new Set());
 
@@ -261,43 +247,15 @@ function App() {
         producerId
       );
 
-    /*
-     * O elemento pode ser criado antes
-     * do stream chegar.
-     */
     if (!stream) {
-      console.log(
-        "[VIDEO] aguardando stream:",
-        producerId
-      );
-
       return;
     }
-
-    console.log(
-      "[VIDEO] registerVideo encontrou stream:",
-      producerId
-    );
 
     element.srcObject =
       stream;
 
     const play = () => {
-      console.log(
-        "[VIDEO] metadata/play:",
-        producerId,
-        element.videoWidth,
-        "x",
-        element.videoHeight
-      );
-
       element.play()
-        .then(() => {
-          console.log(
-            "[VIDEO] PLAY OK:",
-            producerId
-          );
-        })
         .catch(error => {
           console.warn(
             "[VIDEO] play:",
@@ -351,26 +309,11 @@ function App() {
       return;
     }
 
-    console.log(
-      "[VIDEO] attachStream:",
-      producerId,
-      stream
-        .getTracks()
-        .map(
-          track =>
-            `${track.kind}:${track.readyState}`
-        )
-    );
-
     streams.current.set(
       producerId,
       stream
     );
 
-    /*
-     * Força o React a renderizar novamente
-     * depois que o stream chegar.
-     */
     setStreamVersion(
       version => version + 1
     );
@@ -385,11 +328,6 @@ function App() {
         !videos ||
         videos.size === 0
       ) {
-        console.log(
-          "[VIDEO] vídeo ainda não existe:",
-          producerId
-        );
-
         return;
       }
 
@@ -400,11 +338,6 @@ function App() {
         if (!video) {
           continue;
         }
-
-        console.log(
-          "[VIDEO] anexando stream:",
-          producerId
-        );
 
         video.srcObject =
           stream;
@@ -427,28 +360,8 @@ function App() {
         video.volume = 1;
 
         const play = () => {
-          console.log(
-            "[VIDEO] tentando play:",
-            producerId,
-            video.videoWidth,
-            "x",
-            video.videoHeight
-          );
-
           video.play()
-            .then(() => {
-              console.log(
-                "[VIDEO] PLAY OK:",
-                producerId
-              );
-            })
-            .catch(error => {
-              console.warn(
-                "[VIDEO] play bloqueado:",
-                producerId,
-                error
-              );
-            });
+            .catch(() => {});
         };
 
         if (
@@ -462,15 +375,8 @@ function App() {
       }
     };
 
-    /*
-     * Tenta imediatamente.
-     */
     attach();
 
-    /*
-     * Tenta novamente depois do React
-     * criar o elemento.
-     */
     setTimeout(
       attach,
       50
@@ -548,18 +454,33 @@ function App() {
           error
         );
 
-        setStatus(
-          "Modo navegador"
-        );
+        if (alive) {
+          setStatus(
+            "Modo navegador"
+          );
+        }
       }
 
-      connectSignal();
+      if (alive) {
+        connectSignal();
+      }
     }
 
     setup();
 
     return () => {
       alive = false;
+
+      manuallyClosed.current =
+        true;
+
+      if (
+        reconnectTimer.current
+      ) {
+        clearTimeout(
+          reconnectTimer.current
+        );
+      }
 
       cleanupAll();
 
@@ -575,7 +496,35 @@ function App() {
      WEBSOCKET
   ======================================================= */
 
+  function scheduleReconnect() {
+    if (
+      manuallyClosed.current
+    ) {
+      return;
+    }
+
+    if (
+      reconnectTimer.current
+    ) {
+      return;
+    }
+
+    reconnectTimer.current =
+      setTimeout(() => {
+        reconnectTimer.current =
+          null;
+
+        connectSignal();
+      }, 3000);
+  }
+
   function connectSignal() {
+    if (
+      manuallyClosed.current
+    ) {
+      return;
+    }
+
     if (
       ws.current &&
       (
@@ -593,6 +542,10 @@ function App() {
       SIGNALING_URL
     );
 
+    setStatus(
+      "Conectando ao servidor..."
+    );
+
     try {
       const socket =
         new WebSocket(
@@ -604,7 +557,7 @@ function App() {
 
       socket.onopen = () => {
         console.log(
-          "[WS] Conectado"
+          "[WS] CONECTADO"
         );
 
         setError("");
@@ -636,9 +589,9 @@ function App() {
             msg
           );
 
-          /* =================================================
-             ID
-          ================================================= */
+          /* ===============================================
+             CLIENT ID
+          =============================================== */
 
           if (
             msg.type ===
@@ -657,9 +610,9 @@ function App() {
             return;
           }
 
-          /* =================================================
+          /* ===============================================
              ROOM CREATED
-          ================================================= */
+          =============================================== */
 
           if (
             msg.type ===
@@ -696,9 +649,9 @@ function App() {
             return;
           }
 
-          /* =================================================
+          /* ===============================================
              ROOM JOINED
-          ================================================= */
+          =============================================== */
 
           if (
             msg.type ===
@@ -735,9 +688,9 @@ function App() {
             return;
           }
 
-          /* =================================================
+          /* ===============================================
              PRODUCER LIST
-          ================================================= */
+          =============================================== */
 
           if (
             msg.type ===
@@ -766,11 +719,6 @@ function App() {
                   0,
                   MAX_PRODUCERS
                 );
-
-            console.log(
-              "[PRODUCERS]",
-              remote
-            );
 
             setProducers(
               remote
@@ -812,9 +760,9 @@ function App() {
             return;
           }
 
-          /* =================================================
+          /* ===============================================
              NEW PRODUCER
-          ================================================= */
+          =============================================== */
 
           if (
             msg.type ===
@@ -867,9 +815,9 @@ function App() {
             return;
           }
 
-          /* =================================================
+          /* ===============================================
              PRODUCER LEFT
-          ================================================= */
+          =============================================== */
 
           if (
             msg.type ===
@@ -884,9 +832,9 @@ function App() {
             return;
           }
 
-          /* =================================================
+          /* ===============================================
              VIEWER COUNT
-          ================================================= */
+          =============================================== */
 
           if (
             msg.type ===
@@ -901,9 +849,9 @@ function App() {
             return;
           }
 
-          /* =================================================
+          /* ===============================================
              ERROR
-          ================================================= */
+          =============================================== */
 
           if (
             msg.type ===
@@ -922,9 +870,9 @@ function App() {
             return;
           }
 
-          /* =================================================
+          /* ===============================================
              REQUEST OFFER
-          ================================================= */
+          =============================================== */
 
           if (
             msg.type ===
@@ -943,9 +891,9 @@ function App() {
             return;
           }
 
-          /* =================================================
+          /* ===============================================
              OFFER
-          ================================================= */
+          =============================================== */
 
           if (
             msg.type ===
@@ -958,9 +906,9 @@ function App() {
             return;
           }
 
-          /* =================================================
+          /* ===============================================
              ANSWER
-          ================================================= */
+          =============================================== */
 
           if (
             msg.type ===
@@ -973,9 +921,9 @@ function App() {
             return;
           }
 
-          /* =================================================
+          /* ===============================================
              ICE
-          ================================================= */
+          =============================================== */
 
           if (
             msg.type ===
@@ -1007,9 +955,23 @@ function App() {
             "[WS] Fechado"
           );
 
-          setStatus(
-            "Servidor desconectado"
-          );
+          if (
+            ws.current ===
+            socket
+          ) {
+            ws.current =
+              null;
+          }
+
+          if (
+            !manuallyClosed.current
+          ) {
+            setStatus(
+              "Servidor desconectado — reconectando..."
+            );
+
+            scheduleReconnect();
+          }
         };
 
     } catch (error) {
@@ -1021,6 +983,8 @@ function App() {
       setError(
         "WebSocket indisponível."
       );
+
+      scheduleReconnect();
     }
   }
 
@@ -1035,7 +999,7 @@ function App() {
         WebSocket.OPEN
     ) {
       console.warn(
-        "[SEND] WebSocket não conectado",
+        "[SEND] WebSocket não conectado:",
         message
       );
 
@@ -1059,13 +1023,23 @@ function App() {
       payload
     );
 
-    ws.current.send(
-      JSON.stringify(
-        payload
-      )
-    );
+    try {
+      ws.current.send(
+        JSON.stringify(
+          payload
+        )
+      );
 
-    return true;
+      return true;
+
+    } catch (error) {
+      console.error(
+        "[SEND]",
+        error
+      );
+
+      return false;
+    }
   }
 
   /* =======================================================
@@ -1075,10 +1049,17 @@ function App() {
   function createRoom() {
     setError("");
 
-    send({
-      type:
-        "create-room"
-    });
+    const sent =
+      send({
+        type:
+          "create-room"
+      });
+
+    if (!sent) {
+      setError(
+        "Servidor ainda não está conectado."
+      );
+    }
   }
 
   /* =======================================================
@@ -1101,13 +1082,20 @@ function App() {
       return;
     }
 
-    send({
-      type:
-        "join-room",
+    const sent =
+      send({
+        type:
+          "join-room",
 
-      roomId:
-        code
-    });
+        roomId:
+          code
+      });
+
+    if (!sent) {
+      setError(
+        "Servidor ainda não está conectado."
+      );
+    }
   }
 
   /* =======================================================
@@ -1165,6 +1153,18 @@ function App() {
     ) {
       setError(
         `A sala já possui ${MAX_PRODUCERS} transmissões ativas.`
+      );
+
+      return;
+    }
+
+    if (
+      !ws.current ||
+      ws.current.readyState !==
+        WebSocket.OPEN
+    ) {
+      setError(
+        "Servidor de sinalização não está conectado."
       );
 
       return;
@@ -1269,16 +1269,6 @@ function App() {
             stopSharing();
           };
       }
-
-      console.log(
-        "[SCREEN] vídeo:",
-        stream.getVideoTracks().length
-      );
-
-      console.log(
-        "[SCREEN] áudio:",
-        stream.getAudioTracks().length
-      );
 
       attachStream(
         "local",
@@ -1453,12 +1443,19 @@ function App() {
       producerId
     );
 
-    send({
-      type:
-        "request-offer",
+    const sent =
+      send({
+        type:
+          "request-offer",
 
-      producerId
-    });
+        producerId
+      });
+
+    if (!sent) {
+      requestedOffers.current.delete(
+        producerId
+      );
+    }
   }
 
   /* =======================================================
@@ -1488,11 +1485,6 @@ function App() {
         old.signalingState !==
         "closed"
       ) {
-        console.log(
-          "[PRODUCER] peer já existe:",
-          key
-        );
-
         return;
       }
 
@@ -1539,11 +1531,6 @@ function App() {
         if (!event.candidate) {
           return;
         }
-
-        console.log(
-          "[PRODUCER] enviando ICE:",
-          viewerId
-        );
 
         send({
           type:
@@ -1608,11 +1595,6 @@ function App() {
           pc.localDescription
       });
 
-      console.log(
-        "[PRODUCER] offer enviada:",
-        viewerId
-      );
-
     } catch (error) {
       console.error(
         "[PRODUCER] erro offer:",
@@ -1657,20 +1639,11 @@ function App() {
       !producerId ||
       !producerFrom
     ) {
-      console.warn(
-        "[VIEWER] offer inválida"
-      );
-
       return;
     }
 
     const key =
       `${producerId}->local`;
-
-    console.log(
-      "[VIEWER] offer recebida:",
-      producerId
-    );
 
     const old =
       peerConnections.current.get(
@@ -1682,11 +1655,6 @@ function App() {
         old.signalingState !==
         "closed"
       ) {
-        console.log(
-          "[VIEWER] peer já existe:",
-          key
-        );
-
         return;
       }
 
@@ -1694,6 +1662,11 @@ function App() {
         key
       );
     }
+
+    console.log(
+      "[VIEWER] criando peer:",
+      key
+    );
 
     const iceServers =
       await getIceServers();
@@ -1708,25 +1681,17 @@ function App() {
       pc
     );
 
-    /*
-     * Cria a fila antes de qualquer ICE.
-     */
     pendingCandidates.current.set(
       key,
       []
     );
-
-    /* =====================================================
-       TRACK
-    ===================================================== */
 
     pc.ontrack =
       event => {
         console.log(
           "[VIEWER] TRACK:",
           producerId,
-          event.track.kind,
-          event.track.readyState
+          event.track.kind
         );
 
         let stream =
@@ -1770,31 +1735,6 @@ function App() {
           );
         }
 
-        console.log(
-          "[VIEWER] stream recebida:",
-          stream
-            .getTracks()
-            .map(
-              track =>
-                `${track.kind}:${track.readyState}`
-            )
-        );
-
-        /*
-         * Primeiro salva e força render.
-         */
-        streams.current.set(
-          producerId,
-          stream
-        );
-
-        setStreamVersion(
-          version => version + 1
-        );
-
-        /*
-         * Depois tenta anexar.
-         */
         attachStream(
           producerId,
           stream
@@ -1826,11 +1766,6 @@ function App() {
         if (!event.candidate) {
           return;
         }
-
-        console.log(
-          "[VIEWER] enviando ICE:",
-          producerFrom
-        );
 
         send({
           type:
@@ -1891,38 +1826,19 @@ function App() {
       };
 
     try {
-      /*
-       * Primeiro coloca a offer.
-       */
       await pc.setRemoteDescription(
         msg.offer
       );
 
-      console.log(
-        "[VIEWER] remoteDescription configurada:",
-        producerId
-      );
-
-      /*
-       * Depois processa ICE pendente.
-       */
       await flushPendingCandidates(
         key
       );
 
-      /*
-       * Cria answer.
-       */
       const answer =
         await pc.createAnswer();
 
       await pc.setLocalDescription(
         answer
-      );
-
-      console.log(
-        "[VIEWER] enviando answer:",
-        producerId
       );
 
       send({
@@ -1984,11 +1900,6 @@ function App() {
       );
 
     if (!pc) {
-      console.warn(
-        "[PRODUCER] peer não encontrado:",
-        key
-      );
-
       return;
     }
 
@@ -1997,21 +1908,11 @@ function App() {
         pc.signalingState !==
         "have-local-offer"
       ) {
-        console.warn(
-          "[PRODUCER] estado inesperado:",
-          pc.signalingState
-        );
-
         return;
       }
 
       await pc.setRemoteDescription(
         msg.answer
-      );
-
-      console.log(
-        "[PRODUCER] answer recebida:",
-        viewerId
       );
 
       await flushPendingCandidates(
@@ -2053,11 +1954,6 @@ function App() {
       !producerId ||
       !from
     ) {
-      console.warn(
-        "[ICE] mensagem incompleta:",
-        msg
-      );
-
       return;
     }
 
@@ -2079,16 +1975,7 @@ function App() {
         key
       );
 
-    /*
-     * Se a peer ainda não existe,
-     * guarda o ICE.
-     */
     if (!pc) {
-      console.log(
-        "[ICE] peer ainda não existe, enfileirando:",
-        key
-      );
-
       if (
         !pendingCandidates.current.has(
           key
@@ -2109,18 +1996,9 @@ function App() {
       return;
     }
 
-    /*
-     * Se ainda não existe remoteDescription,
-     * também guarda.
-     */
     if (
       !pc.remoteDescription
     ) {
-      console.log(
-        "[ICE] remoteDescription ainda não existe, enfileirando:",
-        key
-      );
-
       if (
         !pendingCandidates.current.has(
           key
@@ -2146,38 +2024,11 @@ function App() {
         msg.candidate
       );
 
-      console.log(
-        "[ICE] candidato adicionado:",
-        key
-      );
-
     } catch (error) {
       console.warn(
-        "[ICE] erro ao adicionar candidato:",
-        key,
+        "[ICE] erro:",
         error
       );
-
-      if (
-        !pc.remoteDescription
-      ) {
-        if (
-          !pendingCandidates.current.has(
-            key
-          )
-        ) {
-          pendingCandidates.current.set(
-            key,
-            []
-          );
-        }
-
-        pendingCandidates.current
-          .get(key)
-          .push(
-            msg.candidate
-          );
-      }
     }
   }
 
@@ -2200,11 +2051,6 @@ function App() {
     if (
       !pc.remoteDescription
     ) {
-      console.log(
-        "[ICE] flush cancelado: sem remoteDescription",
-        key
-      );
-
       return;
     }
 
@@ -2224,11 +2070,6 @@ function App() {
       key
     );
 
-    console.log(
-      `[ICE] processando ${list.length} candidatos pendentes:`,
-      key
-    );
-
     for (
       const candidate
       of list
@@ -2237,16 +2078,9 @@ function App() {
         await pc.addIceCandidate(
           candidate
         );
-
-        console.log(
-          "[ICE] candidato pendente adicionado:",
-          key
-        );
-
       } catch (error) {
         console.warn(
-          "[ICE] erro no candidato pendente:",
-          key,
+          "[ICE] erro pendente:",
           error
         );
       }
@@ -2263,11 +2097,6 @@ function App() {
     if (!producerId) {
       return;
     }
-
-    console.log(
-      "[REMOVE PRODUCER]",
-      producerId
-    );
 
     requestedOffers.current.delete(
       producerId
