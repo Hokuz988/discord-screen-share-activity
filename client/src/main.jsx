@@ -151,6 +151,10 @@ function App() {
     setSelectedProducer
   ] = useState("local");
 
+  /*
+   * Guarda se o áudio de cada transmissão
+   * está habilitado no vídeo principal.
+   */
   const [
     audioStates,
     setAudioStates
@@ -209,6 +213,20 @@ function App() {
    */
   const creatingProducerPeers =
     useRef(new Set());
+
+  /*
+   * Guarda o volume escolhido pelo usuário
+   * para cada transmissão.
+   */
+  const volumeStates =
+    useRef(new Map());
+
+  /*
+   * Guarda o estado de mute de cada
+   * transmissão no vídeo principal.
+   */
+  const muteStates =
+    useRef(new Map());
 
   const roomId =
     useRef("");
@@ -274,8 +292,7 @@ function App() {
 
   function registerVideo(
     producerId,
-    element,
-    isThumbnail = false
+    element
   ) {
     if (!element) {
       return;
@@ -304,32 +321,19 @@ function App() {
       true;
 
     /*
-     * REGRA IMPORTANTE:
+     * =====================================================
+     * MINIATURAS
+     * =====================================================
      *
-     * Miniaturas:
-     * sempre mutadas.
+     * Toda miniatura é SEMPRE muda.
      *
-     * Vídeo local:
-     * sempre mutado.
-     *
-     * Vídeo principal remoto:
-     * áudio controlado pelo estado.
+     * O áudio só existe no vídeo principal.
      */
-    if (
-      isThumbnail ||
-      producerId === "local"
-    ) {
-      element.muted = true;
-    } else {
-      element.muted =
-        !(
-          audioStates[
-            producerId
-          ] ?? true
-        );
-    }
+    element.muted =
+      true;
 
-    element.volume = 1;
+    element.volume =
+      0;
 
     const stream =
       streams.current.get(
@@ -345,27 +349,19 @@ function App() {
 
     const playVideo =
       () => {
-
         element.play()
           .then(() => {
-
             console.log(
               "[VIDEO] PLAY OK:",
-              producerId,
-              isThumbnail
-                ? "(thumbnail)"
-                : "(principal)"
+              producerId
             );
-
           })
           .catch(error => {
-
             console.warn(
               "[VIDEO] play bloqueado:",
               producerId,
               error
             );
-
           });
       };
 
@@ -374,11 +370,170 @@ function App() {
     ) {
       playVideo();
     } else {
-
       element.onloadedmetadata =
         playVideo;
-
     }
+  }
+
+  /* =======================================================
+     REGISTER MAIN VIDEO
+  ======================================================= */
+
+  function registerMainVideo(
+    producerId,
+    element
+  ) {
+    if (!element) {
+      return;
+    }
+
+    let set =
+      videoRefs.current.get(
+        producerId
+      );
+
+    if (!set) {
+      set = new Set();
+
+      videoRefs.current.set(
+        producerId,
+        set
+      );
+    }
+
+    set.add(element);
+
+    element.autoplay =
+      true;
+
+    element.playsInline =
+      true;
+
+    /*
+     * =====================================================
+     * VÍDEO PRINCIPAL
+     * =====================================================
+     *
+     * O áudio é controlado normalmente
+     * pelo próprio controle do vídeo.
+     */
+
+    if (producerId === "local") {
+      /*
+       * Quem transmite nunca escuta
+       * a própria transmissão.
+       */
+      element.muted =
+        true;
+
+      element.volume =
+        0;
+
+    } else {
+
+      const savedVolume =
+        volumeStates.current.get(
+          producerId
+        );
+
+      const savedMuted =
+        muteStates.current.get(
+          producerId
+        );
+
+      element.volume =
+        typeof savedVolume === "number"
+          ? savedVolume
+          : 1;
+
+      element.muted =
+        typeof savedMuted === "boolean"
+          ? savedMuted
+          : true;
+    }
+
+    const stream =
+      streams.current.get(
+        producerId
+      );
+
+    if (!stream) {
+      return;
+    }
+
+    element.srcObject =
+      stream;
+
+    const playVideo =
+      () => {
+        element.play()
+          .then(() => {
+            console.log(
+              "[MAIN VIDEO] PLAY OK:",
+              producerId
+            );
+          })
+          .catch(error => {
+            console.warn(
+              "[MAIN VIDEO] play bloqueado:",
+              producerId,
+              error
+            );
+          });
+      };
+
+    if (
+      element.readyState >= 2
+    ) {
+      playVideo();
+    } else {
+      element.onloadedmetadata =
+        playVideo;
+    }
+
+    /*
+     * Guarda alterações feitas
+     * diretamente nos controles nativos.
+     */
+    element.onvolumechange =
+      () => {
+
+        if (
+          producerId ===
+          "local"
+        ) {
+          /*
+           * Sempre força o local
+           * a permanecer sem áudio.
+           */
+          element.muted =
+            true;
+
+          element.volume =
+            0;
+
+          return;
+        }
+
+        volumeStates.current.set(
+          producerId,
+          element.volume
+        );
+
+        muteStates.current.set(
+          producerId,
+          element.muted
+        );
+
+        setAudioStates(
+          current => ({
+            ...current,
+            [producerId]:
+              !element.muted &&
+              element.volume > 0
+          })
+        );
+      };
   }
 
   /* =======================================================
@@ -462,45 +617,70 @@ function App() {
             true;
 
           /*
-           * Detecta se é miniatura
-           * através do atributo.
+           * =================================================
+           * IMPORTANTE
+           * =================================================
+           *
+           * Aqui NÃO usamos audioStates
+           * para as miniaturas.
+           *
+           * Todas ficam SEMPRE mudas.
            */
-          const isThumbnail =
-            video.dataset.thumbnail ===
-            "true";
 
-          /*
-           * Miniaturas SEMPRE mudas.
-           */
+          const isMainVideo =
+            video.controls === true;
+
           if (
-            isThumbnail ||
-            producerId === "local"
+            producerId ===
+            "local"
           ) {
 
             video.muted =
               true;
 
-          } else {
+            video.volume =
+              0;
 
-            video.muted =
-              !(
-                audioStates[
-                  producerId
-                ] ?? true
+          } else if (
+            isMainVideo
+          ) {
+
+            /*
+             * Vídeo principal:
+             * restaura as preferências.
+             */
+
+            const savedVolume =
+              volumeStates.current.get(
+                producerId
               );
 
-          }
+            const savedMuted =
+              muteStates.current.get(
+                producerId
+              );
 
-          /*
-           * Não força volume zero.
-           * O controle nativo pode alterar
-           * o volume normalmente.
-           */
-          if (
-            typeof video.volume !==
-            "number"
-          ) {
-            video.volume = 1;
+            video.volume =
+              typeof savedVolume === "number"
+                ? savedVolume
+                : 1;
+
+            video.muted =
+              typeof savedMuted === "boolean"
+                ? savedMuted
+                : true;
+
+          } else {
+
+            /*
+             * MINIATURA:
+             * SEMPRE MUDA.
+             */
+            video.muted =
+              true;
+
+            video.volume =
+              0;
           }
 
           const playVideo =
@@ -508,36 +688,27 @@ function App() {
 
               video.play()
                 .then(() => {
-
                   console.log(
                     "[VIDEO] PLAY OK:",
                     producerId
                   );
-
                 })
                 .catch(error => {
-
                   console.warn(
                     "[VIDEO] play:",
                     producerId,
                     error
                   );
-
                 });
-
             };
 
           if (
             video.readyState >= 2
           ) {
-
             playVideo();
-
           } else {
-
             video.onloadedmetadata =
               playVideo;
-
           }
         }
       };
@@ -582,12 +753,9 @@ function App() {
     ) {
 
       try {
-
         video.pause();
         video.srcObject = null;
-
       } catch {}
-
     }
   }
 
@@ -645,15 +813,21 @@ function App() {
 
       try {
 
-        pc.onicecandidate = null;
-        pc.ontrack = null;
-        pc.onconnectionstatechange = null;
-        pc.oniceconnectionstatechange = null;
+        pc.onicecandidate =
+          null;
+
+        pc.ontrack =
+          null;
+
+        pc.onconnectionstatechange =
+          null;
+
+        pc.oniceconnectionstatechange =
+          null;
 
         pc.close();
 
       } catch {}
-
     }
 
     peerConnections.current.delete(
@@ -813,7 +987,6 @@ function App() {
             "[PRODUCER] addTrack:",
             error
           );
-
         }
       }
 
@@ -887,7 +1060,6 @@ function App() {
                   producerId:
                     myId.current
                 });
-
               }
 
             }, 1000);
@@ -913,7 +1085,6 @@ function App() {
               "[PRODUCER] conexão estabelecida:",
               viewerId
             );
-
           }
 
           if (
@@ -933,9 +1104,7 @@ function App() {
                 key
               ) === pc
             ) {
-
               closePeer(key);
-
             }
           }
         };
@@ -957,11 +1126,9 @@ function App() {
       if (
         !pc.localDescription
       ) {
-
         throw new Error(
           "localDescription não criada."
         );
-
       }
 
       console.log(
@@ -998,7 +1165,6 @@ function App() {
       creatingProducerPeers.current.delete(
         viewerId
       );
-
     }
   }
 
@@ -1017,10 +1183,8 @@ function App() {
           pc.iceGatheringState ===
           "complete"
         ) {
-
           resolve();
           return;
-
         }
 
         const timeout =
@@ -1049,7 +1213,6 @@ function App() {
               );
 
               resolve();
-
             }
           };
 
@@ -1057,7 +1220,6 @@ function App() {
           "icegatheringstatechange",
           check
         );
-
       }
     );
   }
@@ -1165,10 +1327,8 @@ function App() {
               );
 
             if (!stream) {
-
               stream =
                 new MediaStream();
-
             }
 
             const exists =
@@ -1185,7 +1345,6 @@ function App() {
               stream.addTrack(
                 event.track
               );
-
             }
           }
 
@@ -1237,31 +1396,6 @@ function App() {
                 ...current,
                 producerId
               ];
-
-            }
-          );
-
-          /*
-           * Primeira transmissão remota
-           * começa com áudio habilitado.
-           */
-          setAudioStates(
-            current => {
-
-              if (
-                current[
-                  producerId
-                ] !== undefined
-              ) {
-                return current;
-              }
-
-              return {
-                ...current,
-                [producerId]:
-                  true
-              };
-
             }
           );
         };
@@ -1315,7 +1449,6 @@ function App() {
             setStatus(
               "Transmissão conectada"
             );
-
           }
 
           if (
@@ -1327,7 +1460,6 @@ function App() {
               "[VIEWER] ICE falhou:",
               producerId
             );
-
           }
         };
 
@@ -1361,7 +1493,6 @@ function App() {
                 producerId,
                 stream
               );
-
             }
           }
 
@@ -1376,7 +1507,6 @@ function App() {
               "[VIEWER] conexão encerrada:",
               producerId
             );
-
           }
         };
 
@@ -1411,7 +1541,6 @@ function App() {
         throw new Error(
           "localDescription do viewer não criada."
         );
-
       }
 
       console.log(
@@ -1441,7 +1570,6 @@ function App() {
       );
 
       closePeer(key);
-
     }
   }
 
@@ -1516,7 +1644,6 @@ function App() {
         viewerId,
         error
       );
-
     }
   }
 
@@ -1571,7 +1698,6 @@ function App() {
 
       key =
         `${producerId}->local`;
-
     }
 
     let pc =
@@ -1596,7 +1722,6 @@ function App() {
           key,
           []
         );
-
       }
 
       pendingCandidates.current
@@ -1627,7 +1752,6 @@ function App() {
           key,
           []
         );
-
       }
 
       pendingCandidates.current
@@ -1657,7 +1781,6 @@ function App() {
         key,
         error
       );
-
     }
   }
 
@@ -1728,7 +1851,6 @@ function App() {
           key,
           error
         );
-
       }
     }
   }
@@ -1771,6 +1893,14 @@ function App() {
       producerId
     );
 
+    volumeStates.current.delete(
+      producerId
+    );
+
+    muteStates.current.delete(
+      producerId
+    );
+
     setProducers(
       current =>
         current.filter(
@@ -1792,7 +1922,6 @@ function App() {
         ];
 
         return next;
-
       }
     );
 
@@ -1807,7 +1936,6 @@ function App() {
         }
 
         return "local";
-
       }
     );
 
@@ -1859,6 +1987,7 @@ function App() {
       const stream =
         await navigator.mediaDevices
           .getDisplayMedia({
+
             video: {
               frameRate: {
                 ideal: 30,
@@ -1874,10 +2003,6 @@ function App() {
               }
             },
 
-            /*
-             * Captura áudio da tela,
-             * mas NÃO reproduz localmente.
-             */
             audio: true
           });
 
@@ -1895,7 +2020,7 @@ function App() {
       );
 
       /*
-       * LOCAL SEMPRE MUDO.
+       * Local sempre sem áudio.
        */
       setAudioStates(
         current => ({
@@ -1926,7 +2051,6 @@ function App() {
               try {
                 track.stop();
               } catch {}
-
             }
           );
 
@@ -1963,9 +2087,7 @@ function App() {
             );
 
             stopSharing();
-
           };
-
       }
 
       attachStream(
@@ -1995,7 +2117,6 @@ function App() {
       setError(
         "Não foi possível iniciar a captura."
       );
-
     }
   }
 
@@ -2027,7 +2148,6 @@ function App() {
         type:
           "stop-sharing"
       });
-
     }
 
     for (
@@ -2042,9 +2162,7 @@ function App() {
           "local->"
         )
       ) {
-
         closePeer(key);
-
       }
     }
 
@@ -2062,10 +2180,8 @@ function App() {
             try {
               track.stop();
             } catch {}
-
           }
         );
-
     }
 
     localStream.current =
@@ -2091,7 +2207,6 @@ function App() {
         delete next.local;
 
         return next;
-
       }
     );
 
@@ -2107,11 +2222,9 @@ function App() {
             producers[0] ||
             "local"
           );
-
         }
 
         return current;
-
       }
     );
 
@@ -2186,7 +2299,6 @@ function App() {
         type:
           "leave-room"
       });
-
     }
 
     cleanupStreams();
@@ -2210,7 +2322,7 @@ function App() {
   }
 
   /* =======================================================
-     AUDIO
+     AUDIO BUTTON
   ======================================================= */
 
   function toggleAudio(
@@ -2224,21 +2336,6 @@ function App() {
       return;
     }
 
-    const next =
-      !(
-        audioStates[
-          producerId
-        ] ?? true
-      );
-
-    setAudioStates(
-      current => ({
-        ...current,
-        [producerId]:
-          next
-      })
-    );
-
     const videos =
       videoRefs.current.get(
         producerId
@@ -2248,40 +2345,62 @@ function App() {
       return;
     }
 
+    /*
+     * Procura especificamente o vídeo
+     * principal, que possui controls=true.
+     */
+    let mainVideo = null;
+
     for (
       const video
       of videos
     ) {
 
-      /*
-       * Miniaturas continuam
-       * SEMPRE mudas.
-       */
       if (
-        video.dataset.thumbnail ===
-        "true"
+        video &&
+        video.controls
       ) {
-        video.muted = true;
-        continue;
+        mainVideo =
+          video;
+
+        break;
       }
+    }
 
-      video.muted =
-        !next;
+    if (!mainVideo) {
+      return;
+    }
 
-      /*
-       * NÃO força volume = 1 aqui.
-       * Assim o controle nativo
-       * continua funcionando.
-       */
+    mainVideo.muted =
+      !mainVideo.muted;
 
-      if (next) {
+    muteStates.current.set(
+      producerId,
+      mainVideo.muted
+    );
 
-        video.play()
-          .catch(
-            () => {}
-          );
+    volumeStates.current.set(
+      producerId,
+      mainVideo.volume
+    );
 
-      }
+    setAudioStates(
+      current => ({
+        ...current,
+        [producerId]:
+          !mainVideo.muted &&
+          mainVideo.volume > 0
+      })
+    );
+
+    if (
+      !mainVideo.muted
+    ) {
+
+      mainVideo.play()
+        .catch(
+          () => {}
+        );
     }
   }
 
@@ -2296,29 +2415,6 @@ function App() {
     setSelectedProducer(
       producerId
     );
-
-    /*
-     * Garante que a transmissão
-     * selecionada fique com áudio.
-     *
-     * A miniatura continuará muda.
-     */
-    if (
-      producerId !==
-      "local"
-    ) {
-
-      setAudioStates(
-        current => ({
-          ...current,
-          [producerId]:
-            current[
-              producerId
-            ] ?? true
-        })
-      );
-
-    }
 
     setTimeout(
       () => {
@@ -2336,52 +2432,6 @@ function App() {
           producerId,
           stream
         );
-
-        /*
-         * Após clicar na transmissão,
-         * tentamos reproduzir o vídeo.
-         * Como houve interação do usuário,
-         * o navegador normalmente permite áudio.
-         */
-        const videos =
-          videoRefs.current.get(
-            producerId
-          );
-
-        if (videos) {
-
-          for (
-            const video
-            of videos
-          ) {
-
-            if (
-              video.dataset.thumbnail ===
-              "true"
-            ) {
-              continue;
-            }
-
-            video.muted =
-              !(
-                audioStates[
-                  producerId
-                ] ?? true
-              );
-
-            video.play()
-              .catch(
-                error => {
-                  console.warn(
-                    "[VIDEO] autoplay após seleção:",
-                    error
-                  );
-                }
-              );
-
-          }
-        }
-
       },
       0
     );
@@ -2405,10 +2455,8 @@ function App() {
             try {
               track.stop();
             } catch {}
-
           }
         );
-
     }
 
     localStream.current =
@@ -2422,7 +2470,6 @@ function App() {
     ) {
 
       closePeer(key);
-
     }
 
     for (
@@ -2438,10 +2485,8 @@ function App() {
             try {
               track.stop();
             } catch {}
-
           }
         );
-
     }
 
     streams.current.clear();
@@ -2463,16 +2508,17 @@ function App() {
       ) {
 
         try {
-
           video.pause();
           video.srcObject = null;
-
         } catch {}
-
       }
     }
 
     videoRefs.current.clear();
+
+    volumeStates.current.clear();
+
+    muteStates.current.clear();
 
     setStreamVersion(
       version =>
@@ -2492,13 +2538,10 @@ function App() {
       "";
 
     setSharing(false);
-
     setProducers([]);
-
     setSelectedProducer(
       "local"
     );
-
     setViewerCount(0);
   }
 
@@ -2554,7 +2597,6 @@ function App() {
         setStatus(
           "Modo navegador"
         );
-
       }
 
       connectSignal();
@@ -2573,9 +2615,7 @@ function App() {
         try {
           ws.current.close();
         } catch {}
-
       }
-
     };
 
   }, []);
@@ -2625,7 +2665,6 @@ function App() {
           setStatus(
             "Servidor conectado"
           );
-
         };
 
       socket.onmessage =
@@ -2820,7 +2859,6 @@ function App() {
                   remote[0] ||
                   "local"
                 );
-
               }
             );
 
@@ -2832,7 +2870,6 @@ function App() {
               requestOffer(
                 producerId
               );
-
             }
 
             return;
@@ -2886,7 +2923,6 @@ function App() {
                   ...current,
                   producerId
                 ];
-
               }
             );
 
@@ -2979,7 +3015,6 @@ function App() {
               await createProducerPeer(
                 viewerId
               );
-
             }
 
             return;
@@ -3045,7 +3080,6 @@ function App() {
           setError(
             "Erro de conexão com o servidor."
           );
-
         };
 
       socket.onclose =
@@ -3058,7 +3092,6 @@ function App() {
           setStatus(
             "Servidor desconectado"
           );
-
         };
 
     } catch (error) {
@@ -3071,7 +3104,6 @@ function App() {
       setError(
         "WebSocket indisponível."
       );
-
     }
   }
 
@@ -3086,6 +3118,7 @@ function App() {
         : []),
 
       ...producers
+
     ].slice(
       0,
       MAX_PRODUCERS
@@ -3145,9 +3178,11 @@ function App() {
           </button>
 
           <div className="divider">
+
             <span>
               ou
             </span>
+
           </div>
 
           <div className="join-box">
@@ -3169,11 +3204,8 @@ function App() {
                     event.key ===
                     "Enter"
                   ) {
-
                     joinRoom();
-
                   }
-
                 }
               }
               placeholder="Código da sala"
@@ -3287,26 +3319,24 @@ function App() {
                     sharing ? (
 
                       /*
+                       * =================================================
                        * SUA PRÓPRIA TRANSMISSÃO
-                       * SEMPRE MUDa.
+                       * =================================================
+                       *
+                       * Sempre sem áudio.
                        */
+
                       <video
                         ref={
                           element => {
 
                             if (element) {
 
-                              element.dataset.thumbnail =
-                                "false";
-
-                              registerVideo(
+                              registerMainVideo(
                                 "local",
-                                element,
-                                false
+                                element
                               );
-
                             }
-
                           }
                         }
                         autoPlay
@@ -3328,50 +3358,41 @@ function App() {
                         </h2>
 
                       </div>
-
                     )
 
                   ) : (
 
                     /*
-                     * VÍDEO PRINCIPAL
+                     * =================================================
+                     * VÍDEO PRINCIPAL DE OUTRA PESSOA
+                     * =================================================
                      *
-                     * NÃO é muted.
-                     * O usuário controla:
+                     * Controles nativos permitem:
+                     *
                      * - volume
                      * - mute
-                     * - play/pause
-                     * pelos controles nativos.
+                     * - barra de progresso/controles
+                     *
+                     * O botão customizado de áudio também
+                     * pode mutar/desmutar.
                      */
+
                     <video
                       ref={
                         element => {
 
                           if (element) {
 
-                            element.dataset.thumbnail =
-                              "false";
-
-                            registerVideo(
+                            registerMainVideo(
                               mainProducer,
-                              element,
-                              false
+                              element
                             );
-
                           }
-
                         }
                       }
                       autoPlay
                       playsInline
                       controls
-                      muted={
-                        !(
-                          audioStates[
-                            mainProducer
-                          ] ?? true
-                        )
-                      }
                     />
 
                   )}
@@ -3386,6 +3407,29 @@ function App() {
                         : "Transmissão ao vivo"}
 
                     </div>
+
+                    {mainProducer !==
+                      "local" && (
+
+                      <button
+                        className="audio-button"
+                        onClick={
+                          () =>
+                            toggleAudio(
+                              mainProducer
+                            )
+                        }
+                      >
+                        {
+                          audioStates[
+                            mainProducer
+                          ]
+                            ? "🔊"
+                            : "🔇"
+                        }
+                      </button>
+
+                    )}
 
                   </div>
 
@@ -3469,31 +3513,31 @@ function App() {
                         <div className="thumb-video">
 
                           {/*
+                           * =================================================
                            * MINIATURA
+                           * =================================================
                            *
-                           * SEMPRE MUTE.
+                           * SEMPRE MUD A.
+                           *
+                           * Não importa se o áudio da transmissão
+                           * está ligado no vídeo principal.
                            */}
+
                           <video
                             ref={
                               element => {
 
                                 if (element) {
 
-                                  element.dataset.thumbnail =
-                                    "true";
-
                                   registerVideo(
                                     producerId,
-                                    element,
-                                    true
+                                    element
                                   );
-
                                 }
-
                               }
                             }
                             autoPlay
-                            muted
+                            muted={true}
                             playsInline
                           />
 
@@ -3511,18 +3555,11 @@ function App() {
                               : "Transmissão"}
                           </span>
 
-                          {/*
-                           * Não existe mais
-                           * botão de áudio
-                           * na miniatura.
-                           */}
-
                         </div>
 
                       </button>
 
                     );
-
                   }
                 )}
 
@@ -3618,7 +3655,6 @@ if (!root) {
   throw new Error(
     "Elemento #root não encontrado."
   );
-
 }
 
 createRoot(root).render(
