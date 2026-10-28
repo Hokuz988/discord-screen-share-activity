@@ -2,17 +2,16 @@ import React, { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { DiscordSDK } from "@discord/embedded-app-sdk";
 
-import "@fontsource-variable/inter";
-import "@fontsource-variable/space-grotesk";
-import "@fontsource/jetbrains-mono/500.css";
-import "@fontsource/jetbrains-mono/600.css";
+import "./fonts.js";
 import "./style.css";
 
 import { api, getToken, IN_DISCORD, setToken } from "./lib/api.js";
 import { useRoom } from "./hooks/useRoom.js";
+import { AudioGuide } from "./components/AudioGuide.jsx";
 import { AuthScreen } from "./components/AuthScreen.jsx";
 import { Lobby } from "./components/Lobby.jsx";
 import { Room } from "./components/Room.jsx";
+import { TopBar } from "./components/TopBar.jsx";
 
 /* =========================================================
    DISCORD
@@ -38,12 +37,31 @@ function useDiscord() {
 
 function SignedIn({ token, user, onLogout, onExpired }) {
   const room = useRoom({ token, onUnauthorized: onExpired });
+  const [tab, setTab] = useState("rooms");
 
   if (room.room) {
     return <Room room={room} />;
   }
 
-  return <Lobby user={user} room={room} onLogout={onLogout} />;
+  return (
+    <div className="shell">
+      <TopBar
+        user={user}
+        connection={room.connection}
+        tab={tab}
+        onTab={setTab}
+        onLogout={onLogout}
+      />
+
+      {tab === "audio" ? (
+        <main className="page">
+          <AudioGuide />
+        </main>
+      ) : (
+        <Lobby room={room} />
+      )}
+    </div>
+  );
 }
 
 function App() {

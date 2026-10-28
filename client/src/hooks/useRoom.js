@@ -664,7 +664,7 @@ export function useRoom({ token, onUnauthorized }) {
     );
 
     setProducers(list);
-    setViewers(Number(msg.viewers) || 0);
+    setViewers(Number(msg.participants) || 0);
 
     for (const id of activeProducers.current) {
       requestOffer(id);

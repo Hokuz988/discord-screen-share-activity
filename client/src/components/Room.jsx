@@ -1,21 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 
 import { MAX_PRODUCERS } from "../hooks/useRoom.js";
-
-import {
-  CheckIcon,
-  CopyIcon,
-  ExpandIcon,
-  EyeIcon,
-  LockIcon,
-  MonitorIcon,
-  MuteIcon,
-  StopIcon,
-  VolumeIcon
-} from "./Icons.jsx";
-
+import { ExpandIcon, MuteIcon, VolumeIcon } from "./Icons.jsx";
 import { ShareDialog } from "./ShareDialog.jsx";
-import { StatusDot, initials } from "./TopBar.jsx";
+import { StatusDot, Wordmark } from "./TopBar.jsx";
 
 /* =========================================================
    VIDEO
@@ -77,7 +65,6 @@ function Video({ stream, muted, volume = 1, className, onAutoplayBlocked, onStat
       lastTime = now;
 
       onStats({
-        width: video.videoWidth,
         height: video.videoHeight,
         fps: fps > 0 && fps < 240 ? fps : null
       });
@@ -108,8 +95,7 @@ function CopyInvite({ invite }) {
   }
 
   return (
-    <button type="button" className="btn btn-ghost" onClick={copy}>
-      {copied ? <CheckIcon size={16} /> : <CopyIcon size={16} />}
+    <button type="button" className="btn btn-secondary btn-sm" onClick={copy}>
       {copied ? "Copiado" : "Copiar convite"}
     </button>
   );
@@ -127,9 +113,9 @@ function Toasts({ notices, error, onDismissError }) {
       ))}
 
       {error && (
-        <div className="toast danger" role="alert">
+        <div className="toast toast-error" role="alert">
           <span>{error}</span>
-          <button type="button" className="alert-close" aria-label="Fechar aviso" onClick={onDismissError}>×</button>
+          <button type="button" className="link" onClick={onDismissError}>Fechar</button>
         </div>
       )}
     </div>
@@ -181,26 +167,24 @@ export function Room({ room }) {
   }
 
   return (
-    <div className="screen room">
-      <header className="room-bar">
-        <div className="room-meta">
-          <span className="eyebrow">Sala</span>
-          <span className="room-code">{room.room.code}</span>
-          <span className="badge-secure">
-            <LockIcon size={14} strokeWidth={2.2} />
-            Ponta a ponta
-          </span>
-          <span className="meta-muted">
-            <EyeIcon size={16} />
-            {room.viewers} assistindo
+    <div className="shell room">
+      <header className="nav">
+        <div className="nav-left">
+          <Wordmark />
+          <div className="room-id">
+            <span className="fine">Sala</span>
+            <span className="mono">{room.room.code}</span>
+          </div>
+          <span className="fine">
+            {room.viewers === 1 ? "Só você na sala" : `${room.viewers} pessoas na sala`}
           </span>
         </div>
 
-        <div className="room-actions">
+        <div className="nav-right">
           {room.connection !== "online" && <StatusDot connection={room.connection} />}
           <CopyInvite invite={room.room.invite} />
-          <button type="button" className="btn btn-danger-soft" onClick={room.leaveRoom}>
-            Sair
+          <button type="button" className="btn btn-quiet btn-sm" onClick={room.leaveRoom}>
+            Sair da sala
           </button>
         </div>
       </header>
@@ -220,37 +204,35 @@ export function Room({ room }) {
                   onStats={setStats}
                 />
               ) : (
-                <div className="stage-loading">
+                <div className="stage-message">
                   <span className="spinner" aria-hidden="true" />
-                  Conectando à transmissão de {selected.name}…
+                  Conectando à tela de {selected.name}
                 </div>
               )}
 
-              <div className="stage-top">
-                <span className="live-pill"><span />AO VIVO</span>
+              <div className="overlay overlay-top">
+                <span className="stage-name">
+                  <span className="live">Ao vivo</span>
+                  {selected.name}
+                </span>
                 {stats && (
-                  <span className="stats-pill mono">
-                    {stats.height}p{stats.fps ? ` · ${stats.fps} fps` : ""}
+                  <span className="stage-stats mono">
+                    {stats.height}p{stats.fps ? ` ${stats.fps}fps` : ""}
                   </span>
                 )}
               </div>
 
-              <div className="stage-owner">
-                <span className="avatar sm">{initials(selected.name)}</span>
-                {selected.name}
-              </div>
-
-              <div className="stage-controls">
+              <div className="overlay overlay-bottom">
                 {!selected.isLocal && (
                   <div className="volume">
                     <button
                       type="button"
-                      className="overlay-btn"
+                      className="icon-btn"
                       aria-label={volume === 0 ? "Ativar som" : "Silenciar"}
                       title={volume === 0 ? "Ativar som" : "Silenciar"}
                       onClick={toggleMute}
                     >
-                      {volume === 0 ? <MuteIcon /> : <VolumeIcon />}
+                      {volume === 0 ? <MuteIcon size={16} /> : <VolumeIcon size={16} />}
                     </button>
                     <input
                       type="range"
@@ -263,23 +245,21 @@ export function Room({ room }) {
                     />
                   </div>
                 )}
-                <button type="button" className="overlay-btn" aria-label="Tela cheia" title="Tela cheia" onClick={fullscreen}>
-                  <ExpandIcon />
+                <button type="button" className="icon-btn" aria-label="Tela cheia" title="Tela cheia" onClick={fullscreen}>
+                  <ExpandIcon size={16} />
                 </button>
               </div>
             </div>
           ) : (
-            <div className="stage-empty">
-              <span className="empty-icon"><MonitorIcon size={28} /></span>
-              <h2>Ninguém transmitindo ainda</h2>
-              <p>Compartilhe sua tela ou mande o convite para alguém.</p>
+            <div className="stage-message">
+              <p className="stage-empty-title">Ninguém está transmitindo</p>
+              <p className="muted">Compartilhe sua tela ou mande o convite para alguém.</p>
               <button
                 type="button"
-                className="btn btn-primary btn-lg"
+                className="btn btn-primary"
                 disabled={shareDisabled}
                 onClick={() => setDialogOpen(true)}
               >
-                <MonitorIcon size={16} />
                 Compartilhar tela
               </button>
             </div>
@@ -288,11 +268,11 @@ export function Room({ room }) {
 
         <aside className="sidebar">
           <div className="sidebar-head">
-            <strong>Transmissões</strong>
-            <span className="mono muted">{tiles.length} / {MAX_PRODUCERS}</span>
+            <span>Transmissões</span>
+            <span className="mono fine">{tiles.length}/{MAX_PRODUCERS}</span>
           </div>
 
-          <div className="tile-list">
+          <div className="tiles">
             {tiles.map(tile => {
               const active = selected?.id === tile.id;
 
@@ -304,62 +284,57 @@ export function Room({ room }) {
                   aria-pressed={active}
                   onClick={() => setSelectedId(tile.id)}
                 >
-                  <div className="tile-preview">
+                  <span className="tile-preview">
                     {tile.stream ? (
                       <Video stream={tile.stream} muted className="tile-video" />
                     ) : (
-                      <span className="tile-wait"><span className="spinner sm" aria-hidden="true" /></span>
+                      <span className="spinner sm" aria-hidden="true" />
                     )}
-                    <span className="live-tag">AO VIVO</span>
-                  </div>
-                  <div className="tile-info">
+                  </span>
+                  <span className="tile-info">
                     <span className="tile-name">{tile.name}</span>
-                    <span className={active ? "tile-state accent" : "tile-state"}>
-                      {active ? "Assistindo" : tile.isLocal ? "Sua tela" : "Assistir"}
+                    <span className="fine">
+                      {tile.isLocal ? "Sua tela" : active ? "Assistindo" : "Assistir"}
                     </span>
-                  </div>
+                  </span>
                 </button>
               );
             })}
 
-            {freeSlots > 0 && (
-              <div className="slot-free">
-                {freeSlots === 1 ? "1 vaga livre" : `${freeSlots} vagas livres`}
-              </div>
-            )}
+            {Array.from({ length: freeSlots }, (_, index) => (
+              <div key={index} className="tile-empty fine">Vaga livre</div>
+            ))}
           </div>
 
           <div className="sidebar-foot">
             {room.sharing ? (
-              <div className="share-actions">
+              <div className="button-row">
                 {room.hasAudio && (
                   <button
                     type="button"
-                    className={`btn btn-ghost btn-lg ${room.audioMuted ? "is-muted" : ""}`}
+                    className={`btn btn-secondary ${room.audioMuted ? "is-off" : ""}`}
                     aria-pressed={room.audioMuted}
                     onClick={room.toggleAudio}
                   >
-                    {room.audioMuted ? <MuteIcon size={16} /> : <VolumeIcon size={16} />}
-                    {room.audioMuted ? "Áudio mudo" : "Áudio ligado"}
+                    {room.audioMuted ? "Som desligado" : "Som ligado"}
                   </button>
                 )}
-                <button type="button" className="btn btn-danger btn-lg" onClick={room.stopSharing}>
-                  <StopIcon /> Parar
+                <button type="button" className="btn btn-danger" onClick={room.stopSharing}>
+                  Parar
                 </button>
               </div>
             ) : (
               <button
                 type="button"
-                className="btn btn-primary btn-lg"
+                className="btn btn-primary btn-block"
                 disabled={shareDisabled}
                 onClick={() => setDialogOpen(true)}
               >
-                <MonitorIcon size={16} />
-                {room.canShare ? "Compartilhar tela" : "Sala lotada"}
+                {room.canShare ? "Compartilhar tela" : "Sala cheia"}
               </button>
             )}
 
-            <p className="foot-note">Vídeo e áudio cifrados com DTLS-SRTP</p>
+            <p className="fine center">Vídeo e som cifrados de ponta a ponta</p>
           </div>
         </aside>
       </div>
