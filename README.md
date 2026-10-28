@@ -1,82 +1,68 @@
 # ScreenCast — Discord Activity
 
-MVP de uma Discord Activity para compartilhar a tela dentro da própria Activity.
+Compartilhamento de tela com até 3 transmissões simultâneas, contas de usuário
+(e-mail/senha ou Google) e criptografia ponta a ponta.
 
-## O que já existe
+## Estrutura
 
-- UI de Activity estilo Discord
-- Embedded App SDK
-- botão para capturar tela/janela/aba
-- WebRTC para transmitir vídeo
-- servidor WebSocket para sinalização
-- STUN configurado
-- contagem básica de espectadores
-- parada automática quando o usuário encerra a captura
+```
+client/src/
+  main.jsx            App: sessão, troca de telas
+  hooks/useRoom.js    Sinalização + WebRTC
+  lib/api.js          Chamadas HTTP e token de sessão
+  lib/e2e.js          Criptografia da sala (convite, AES-GCM)
+  lib/google.js       Botão "Continuar com Google"
+  components/         AuthScreen, Lobby, Room, TopBar, Icons
+server/
+  server.js           Express + WebSocket
+  src/auth.js         Cadastro, login, Google, sessões
+  src/signaling.js    Salas e repasse de sinais cifrados
+  src/security.js     scrypt, AES-256-GCM, HMAC, rate limit
+  src/store.js        Armazenamento (JSON cifrado)
+```
 
-## Importante
+## Segurança
 
-A Activity não captura a tela escondido. O navegador/cliente precisa mostrar a seleção de compartilhamento e o usuário precisa escolher o conteúdo.
+| O quê | Como |
+|---|---|
+| Vídeo/áudio | WebRTC (DTLS-SRTP), ponta a ponta entre navegadores |
+| Sinalização | Ofertas/respostas cifradas com AES-256-GCM usando a chave do convite. O servidor não vê SDP/IPs e não consegue fazer MITM |
+| Convite | `CÓDIGO.CHAVE` — a chave (256 bits) nunca vai ao servidor; ele só recebe um HMAC derivado para barrar quem não tem o convite |
+| Senhas | HMAC (pepper) + scrypt N=2¹⁶, comparação em tempo constante, bloqueio após 5 erros |
+| Dados em repouso | E-mail e nome cifrados com AES-256-GCM; busca por índice cego (HMAC) |
+| Sessões | Token aleatório de 256 bits; servidor guarda só o SHA-256; expira em 7 dias; logout derruba o WebSocket |
+| Google | ID token verificado (assinatura, emissor, audiência, e-mail verificado). Vincular Google a uma conta existente apaga a senha antiga (evita sequestro de conta pré-criada) |
+| API | Helmet, CORS e origem do WebSocket restritos, limite de payload, rate limit, TURN só para logados |
+| Frontend | CSP no build, sem scripts de terceiros além do Google, fontes empacotadas |
 
-Também é possível que uma conexão WebRTC precise de TURN em redes restritivas. O projeto vem com STUN para o MVP; para produção, configure um servidor TURN.
-
-## Requisitos
-
-- Node.js atual
-- uma aplicação criada no Discord Developer Portal
-- Embedded App/Activity configurada
-- URL HTTPS pública para testar dentro do Discord
-
-## Instalação
+## Rodando localmente
 
 ```bash
 npm install
+npm --prefix server install
+
 cp .env.example .env
-```
+cp server/.env.example server/.env
+# preencha MASTER_KEY em server/.env:
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 
-Edite `.env`:
-
-```env
-VITE_DISCORD_CLIENT_ID=SEU_CLIENT_ID
-VITE_SIGNALING_URL=ws://localhost:8787
-```
-
-Depois:
-
-```bash
 npm run dev
 ```
 
-O frontend fica em:
+Frontend em `http://localhost:5173`, servidor em `http://localhost:8787`.
 
-```text
-http://localhost:5173
-```
+## Login com Google
 
-O servidor de sinalização fica em:
+1. Google Cloud Console → APIs e serviços → Credenciais → Criar ID do cliente OAuth → **Aplicativo da Web**.
+2. Em **Origens JavaScript autorizadas**, adicione `http://localhost:5173` e o domínio do seu frontend.
+3. Use o mesmo Client ID em `GOOGLE_CLIENT_ID` (servidor) e `VITE_GOOGLE_CLIENT_ID` (frontend).
 
-```text
-ws://localhost:8787
-```
+Dentro do app do Discord o popup do Google costuma ser bloqueado; nesse caso a
+tela mostra só e-mail e senha.
 
-## Teste rápido
+## Deploy
 
-Você pode abrir duas abas do frontend para testar a parte WebRTC.
-
-1. Aba A: clique em "Compartilhar tela".
-2. Escolha uma tela/janela/aba.
-3. Aba B: entre na mesma sala.
-4. A transmissão deverá aparecer.
-
-Para testar como Activity, siga o fluxo oficial do Discord para configurar uma aplicação e a URL do cliente.
-
-## Próximos passos para produção
-
-1. Autenticar usuários pelo Embedded App SDK.
-2. Usar o ID do canal/instância da Activity como identificador da sala.
-3. Corrigir a negociação para múltiplos espectadores de forma robusta.
-4. Adicionar TURN.
-5. Limitar bitrate/FPS.
-6. Adicionar seleção de qualidade.
-7. Adicionar áudio separado.
-8. Adicionar permissões e botão "Assistir".
-9. Fazer deploy HTTPS do frontend e WSS do servidor.
+- **Frontend** (estático, `npm run build` → `dist/`): Vercel, Netlify, Cloudflare Pages.
+- **Servidor** (precisa de WebSocket e processo contínuo): Render, Railway, Fly.io.
+  Configure `MASTER_KEY`, `ALLOWED_ORIGINS`, `GOOGLE_CLIENT_ID`, `TURN_*` e um
+  disco persistente em `DATA_DIR` — sem ele as contas somem a cada deploy.

@@ -1,15 +1,21 @@
 {
   "name": "screencast-server",
-  "version": "1.0.0",
-  "description": "WebRTC signaling server for ScreenCast Activity",
+  "version": "2.0.0",
+  "description": "Auth + WebRTC signaling server for ScreenCast Activity",
   "type": "module",
+  "engines": {
+    "node": ">=22.12"
+  },
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js"
+    "dev": "node --watch --env-file-if-exists=.env server.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^5.1.0",
+    "helmet": "^8.1.0",
+    "jose": "^6.0.11",
+    "pg": "^8.23.1",
     "ws": "^8.18.0"
   }
 }
