@@ -1,10 +1,10 @@
-{
+﻿{
   "name": "screencast-server",
   "version": "2.0.0",
   "description": "Auth + WebRTC signaling server for ScreenCast Activity",
   "type": "module",
   "engines": {
-    "node": ">=22.12"
+    "node": "24.x"
   },
   "scripts": {
     "start": "node server.js",
