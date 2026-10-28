@@ -13,6 +13,64 @@ import {
 
 export const MAX_PRODUCERS = 3;
 
+export const QUALITY_PRESETS = {
+  light: { label: "Leve", detail: "720p · 30 fps", width: 1280, height: 720, fps: 30, bitrate: 2_500_000, hint: "detail" },
+  balanced: { label: "Equilibrada", detail: "1080p · 30 fps", width: 1920, height: 1080, fps: 30, bitrate: 4_500_000, hint: "detail" },
+  smooth: { label: "Fluida", detail: "1080p · 60 fps", width: 1920, height: 1080, fps: 60, bitrate: 8_000_000, hint: "motion" }
+};
+
+/*
+ * O navegador não deixa excluir um app específico do áudio.
+ * "tab" captura só a aba escolhida (nunca o Discord). "system"
+ * pede restrictOwnAudio, que tira o som do próprio app quando
+ * suportado — dentro do app do Discord, isso inclui a call.
+ */
+function displayMediaOptions({ quality, audio }) {
+  const preset = QUALITY_PRESETS[quality] || QUALITY_PRESETS.balanced;
+
+  return {
+    video: {
+      width: { ideal: preset.width },
+      height: { ideal: preset.height },
+      frameRate: { ideal: preset.fps, max: preset.fps },
+      displaySurface: audio === "tab" ? "browser" : "monitor"
+    },
+    audio:
+      audio === "none"
+        ? false
+        : {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+            suppressLocalAudioPlayback: false,
+            restrictOwnAudio: true
+          },
+    systemAudio: audio === "system" ? "include" : "exclude",
+    selfBrowserSurface: "exclude",
+    surfaceSwitching: "include"
+  };
+}
+
+async function applySenderLimits(pc, preset) {
+  for (const sender of pc.getSenders()) {
+    if (sender.track?.kind !== "video") {
+      continue;
+    }
+
+    try {
+      const params = sender.getParameters();
+
+      params.encodings = params.encodings?.length ? params.encodings : [{}];
+      params.encodings[0].maxBitrate = preset.bitrate;
+      params.encodings[0].maxFramerate = preset.fps;
+      params.degradationPreference =
+        preset.hint === "motion" ? "maintain-framerate" : "maintain-resolution";
+
+      await sender.setParameters(params);
+    } catch {}
+  }
+}
+
 const FALLBACK_ICE = [
   { urls: ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"] }
 ];
@@ -68,6 +126,8 @@ export function useRoom({ token, onUnauthorized }) {
   const [sharing, setSharing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [audioMuted, setAudioMuted] = useState(false);
+  const [notices, setNotices] = useState([]);
   const [, refresh] = useReducer(value => value + 1, 0);
 
   const ws = useRef(null);
@@ -81,6 +141,10 @@ export function useRoom({ token, onUnauthorized }) {
   const requested = useRef(new Set());
   const activeProducers = useRef(new Set());
   const iceCache = useRef({ servers: null, at: 0 });
+  const preset = useRef(QUALITY_PRESETS.balanced);
+  const producerNames = useRef(new Map());
+  const namesSeeded = useRef(false);
+  const noticeId = useRef(0);
   const onUnauthorizedRef = useRef(onUnauthorized);
 
   onUnauthorizedRef.current = onUnauthorized;
@@ -97,6 +161,17 @@ export function useRoom({ token, onUnauthorized }) {
     socket.send(JSON.stringify(message));
     return true;
   }, []);
+
+  /* ----------------------- NOTICES ------------------------ */
+
+  function notify(text) {
+    const id = ++noticeId.current;
+
+    setNotices(list => [...list.slice(-2), { id, text }]);
+    setTimeout(() => {
+      setNotices(list => list.filter(item => item.id !== id));
+    }, 4000);
+  }
 
   /* ------------------------- ICE -------------------------- */
 
@@ -225,6 +300,7 @@ export function useRoom({ token, onUnauthorized }) {
     };
 
     try {
+      await applySenderLimits(pc, preset.current);
       await pc.setLocalDescription(await pc.createOffer());
       await waitForIceGathering(pc);
 
@@ -372,24 +448,26 @@ export function useRoom({ token, onUnauthorized }) {
     refresh();
   }
 
-  async function startSharing() {
+  async function startSharing(options = {}) {
     if (localStream.current || !roomRef.current) {
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      setError("Este dispositivo não permite compartilhar a tela. Use um computador.");
       return;
     }
 
     setError("");
 
+    preset.current = QUALITY_PRESETS[options.quality] || QUALITY_PRESETS.balanced;
+
     let stream;
 
     try {
-      stream = await navigator.mediaDevices.getDisplayMedia({
-        video: {
-          frameRate: { ideal: 30, max: 60 },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 }
-        },
-        audio: true
-      });
+      stream = await navigator.mediaDevices.getDisplayMedia(
+        displayMediaOptions(options)
+      );
     } catch (err) {
       if (err?.name !== "NotAllowedError") {
         setError("Não foi possível iniciar a captura de tela.");
@@ -406,10 +484,19 @@ export function useRoom({ token, onUnauthorized }) {
     const [videoTrack] = stream.getVideoTracks();
 
     if (videoTrack) {
-      videoTrack.contentHint = "detail";
+      videoTrack.contentHint = preset.current.hint;
       videoTrack.addEventListener("ended", () => stopSharing());
     }
 
+    if (options.audio !== "none" && stream.getAudioTracks().length === 0) {
+      notify(
+        options.audio === "tab"
+          ? "Sem som: marque “Compartilhar áudio da aba” ao escolher uma aba."
+          : "Sem som: o navegador não liberou o áudio dessa tela."
+      );
+    }
+
+    setAudioMuted(false);
     localStream.current = stream;
     streams.current.set("local", stream);
 
@@ -431,6 +518,26 @@ export function useRoom({ token, onUnauthorized }) {
     releaseLocal();
   }
 
+  /*
+   * Silencia sem renegociar: a trilha continua, mas envia
+   * silêncio para todo mundo.
+   */
+  function toggleAudio() {
+    const tracks = localStream.current?.getAudioTracks() || [];
+
+    if (tracks.length === 0) {
+      return;
+    }
+
+    const muted = tracks[0].enabled;
+
+    for (const track of tracks) {
+      track.enabled = !muted;
+    }
+
+    setAudioMuted(muted);
+  }
+
   /* ------------------------ ROOMS ------------------------- */
 
   function resetRoom() {
@@ -443,6 +550,7 @@ export function useRoom({ token, onUnauthorized }) {
 
     requested.current.clear();
     activeProducers.current.clear();
+    producerNames.current.clear();
     roomRef.current = null;
     pendingRoom.current = null;
 
@@ -505,6 +613,7 @@ export function useRoom({ token, onUnauthorized }) {
     }
 
     pendingRoom.current = null;
+    namesSeeded.current = false;
 
     roomRef.current = {
       code,
@@ -528,8 +637,26 @@ export function useRoom({ token, onUnauthorized }) {
 
     for (const id of [...activeProducers.current]) {
       if (!ids.has(id)) {
+        notify(`${producerNames.current.get(id) || "Alguém"} parou de transmitir`);
+        producerNames.current.delete(id);
         removeRemote(id);
       }
+    }
+
+    const announce = namesSeeded.current;
+    namesSeeded.current = true;
+
+    for (const item of list) {
+      if (
+        announce &&
+        item.id !== myId.current &&
+        !activeProducers.current.has(item.id) &&
+        !producerNames.current.has(item.id)
+      ) {
+        notify(`${item.name} começou a transmitir`);
+      }
+
+      producerNames.current.set(item.id, item.name);
     }
 
     activeProducers.current = new Set(
@@ -721,6 +848,10 @@ export function useRoom({ token, onUnauthorized }) {
     viewers,
     sharing: sharing || Boolean(localStream.current),
     canShare: !localStream.current && producers.length < MAX_PRODUCERS,
+    hasAudio: Boolean(localStream.current?.getAudioTracks().length),
+    audioMuted,
+    toggleAudio,
+    notices,
     busy,
     error,
     clearError: () => setError(""),
