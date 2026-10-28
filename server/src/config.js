@@ -27,15 +27,27 @@ function loadMasterKey() {
   const raw = process.env.MASTER_KEY;
 
   if (raw) {
-    const key = Buffer.from(raw, "base64");
+    /*
+     * Aceita base64 de 32+ bytes ou qualquer segredo aleatório
+     * de 32+ caracteres (ex.: o botão "Generate" do Render). A
+     * chave só alimenta o HKDF, então os bytes brutos servem.
+     */
+    const decoded = Buffer.from(raw, "base64");
 
-    if (key.length < 32) {
-      throw new Error(
-        "MASTER_KEY precisa ter pelo menos 32 bytes (base64)."
-      );
+    if (
+      decoded.length >= 32 &&
+      decoded.toString("base64").replace(/=+$/, "") === raw.replace(/=+$/, "")
+    ) {
+      return decoded;
     }
 
-    return key;
+    if (raw.length >= 32) {
+      return Buffer.from(raw, "utf8");
+    }
+
+    throw new Error(
+      "MASTER_KEY curta demais: use pelo menos 32 caracteres aleatórios."
+    );
   }
 
   if (isProduction) {
