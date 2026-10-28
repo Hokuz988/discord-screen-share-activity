@@ -8,6 +8,7 @@ import {
   createRateLimiter,
   hashPassword,
   randomToken,
+  safeEqual,
   verifyPassword
 } from "./security.js";
 
@@ -106,14 +107,23 @@ const googleKeys = createRemoteJWKSet(
   new URL("https://www.googleapis.com/oauth2/v3/certs")
 );
 
-async function verifyGoogleCredential(credential) {
+async function verifyGoogleCredential(credential, nonce) {
   const { payload } = await jwtVerify(credential, googleKeys, {
     issuer: ["https://accounts.google.com", "accounts.google.com"],
-    audience: config.googleClientId
+    audience: config.googleClientId,
+    maxTokenAge: "10m"
   });
 
   if (!payload.sub || !payload.email || payload.email_verified !== true) {
     throw new Error("Conta Google sem e-mail verificado.");
+  }
+
+  /*
+   * O nonce foi gerado pelo navegador que abriu o login: um
+   * token capturado de outro lugar não serve aqui.
+   */
+  if (typeof payload.nonce !== "string" || !safeEqual(payload.nonce, nonce)) {
+    throw new Error("Nonce inválido.");
   }
 
   return payload;
@@ -245,15 +255,20 @@ export function createAuthRouter({ onSessionsRevoked }) {
     }
 
     const credential = String(req.body?.credential || "");
+    const nonce = String(req.body?.nonce || "");
 
-    if (!credential || credential.length > 4096) {
+    if (
+      !credential ||
+      credential.length > 4096 ||
+      !/^[a-f0-9]{48}$/.test(nonce)
+    ) {
       return res.status(400).json({ error: "Credencial inválida." });
     }
 
     let profile;
 
     try {
-      profile = await verifyGoogleCredential(credential);
+      profile = await verifyGoogleCredential(credential, nonce);
     } catch {
       return res.status(401).json({
         error: "Não foi possível validar o login do Google."

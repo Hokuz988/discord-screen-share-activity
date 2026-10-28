@@ -103,7 +103,7 @@ async function request(path, { method = "GET", body } = {}) {
 export const api = {
   signup: payload => request("/auth/signup", { method: "POST", body: payload }),
   login: payload => request("/auth/login", { method: "POST", body: payload }),
-  google: credential => request("/auth/google", { method: "POST", body: { credential } }),
+  google: (credential, nonce) => request("/auth/google", { method: "POST", body: { credential, nonce } }),
   me: () => request("/auth/me"),
   logout: () => request("/auth/logout", { method: "POST" }),
   turn: () => request("/turn-credentials")

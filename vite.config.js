@@ -11,26 +11,28 @@ function origin(url) {
 
 /*
  * CSP só no build: em dev o Vite injeta scripts inline (HMR).
- * Bloqueia scripts de terceiros, limitando o estrago de um XSS
- * (ex.: roubar o token de sessão).
+ * Bloqueia qualquer script de terceiros, limitando o estrago
+ * de um XSS (ex.: roubar o token de sessão).
  */
 function contentSecurityPolicy(env) {
-  const google = "https://accounts.google.com";
+  const apiOrigin = origin(
+    env.VITE_API_URL || "https://screen-share-activity.onrender.com"
+  );
 
   const connect = [
     "'self'",
-    origin(env.VITE_API_URL),
-    origin(env.VITE_SIGNALING_URL),
-    `${google}/gsi/`
+    apiOrigin,
+    apiOrigin.replace(/^http/, "ws"),
+    origin(env.VITE_SIGNALING_URL)
   ].filter(Boolean);
 
   const policy = [
     "default-src 'self'",
-    `script-src 'self' ${google}/gsi/client`,
-    `style-src 'self' 'unsafe-inline' ${google}/gsi/style`,
-    `frame-src ${google}/gsi/`,
-    `connect-src ${connect.join(" ")}`,
-    "img-src 'self' data: https://*.googleusercontent.com",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "frame-src 'none'",
+    `connect-src ${[...new Set(connect)].join(" ")}`,
+    "img-src 'self' data:",
     "font-src 'self'",
     "media-src 'self' blob:",
     "object-src 'none'",

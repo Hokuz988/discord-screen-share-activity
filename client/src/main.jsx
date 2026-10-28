@@ -9,7 +9,6 @@ import "@fontsource/jetbrains-mono/600.css";
 import "./style.css";
 
 import { api, getToken, IN_DISCORD, setToken } from "./lib/api.js";
-import { googleSignOut } from "./lib/google.js";
 import { useRoom } from "./hooks/useRoom.js";
 import { AuthScreen } from "./components/AuthScreen.jsx";
 import { Lobby } from "./components/Lobby.jsx";
@@ -58,7 +57,6 @@ function App() {
     setToken("");
     setTokenState("");
     setUser(null);
-    googleSignOut();
   }, []);
 
   useEffect(() => {

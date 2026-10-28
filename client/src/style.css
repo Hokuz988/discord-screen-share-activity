@@ -534,10 +534,16 @@ button:disabled {
   color: var(--text);
 }
 
-.google-slot {
-  min-height: 44px;
-  display: flex;
-  justify-content: center;
+.btn-google {
+  width: 100%;
+  gap: 10px;
+  background: #fff;
+  border-color: var(--border-strong);
+  color: #1f1f1f;
+}
+
+.btn-google:not(:disabled):hover {
+  background: #f1f3f4;
 }
 
 /* =========================================================

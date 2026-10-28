@@ -1,64 +1,115 @@
 import { GOOGLE_CLIENT_ID } from "./api.js";
 
 /* =========================================================
-   GOOGLE IDENTITY SERVICES
-   O Google devolve um ID token assinado; o servidor valida a
-   assinatura e a audiência antes de aceitar.
+   LOGIN COM GOOGLE (OpenID Connect, popup)
+   Abre a tela de login do Google numa janela. Ela volta para
+   /google-callback.html, que devolve o ID token por um
+   BroadcastChannel (funciona mesmo quando o Google corta o
+   window.opener). O servidor valida assinatura, audiência e
+   o nonce antes de aceitar.
+
+   Nenhum script do Google roda no site.
 ========================================================= */
-
-let loading = null;
-
-function loadScript() {
-  if (window.google?.accounts?.id) {
-    return Promise.resolve();
-  }
-
-  if (!loading) {
-    loading = new Promise((resolve, reject) => {
-      const script = document.createElement("script");
-
-      script.src = "https://accounts.google.com/gsi/client";
-      script.async = true;
-      script.onload = resolve;
-      script.onerror = () => {
-        loading = null;
-        reject(new Error("Não foi possível carregar o login do Google."));
-      };
-
-      document.head.appendChild(script);
-    });
-  }
-
-  return loading;
-}
 
 export const googleEnabled = Boolean(GOOGLE_CLIENT_ID);
 
-export async function renderGoogleButton(element, { onCredential, text }) {
-  await loadScript();
+const CHANNEL = "screencast-google-auth";
+const TIMEOUT_MS = 5 * 60 * 1000;
 
-  window.google.accounts.id.initialize({
-    client_id: GOOGLE_CLIENT_ID,
-    callback: response => onCredential(response.credential),
-    ux_mode: "popup",
-    auto_select: false,
-    cancel_on_tap_outside: true,
-    use_fedcm_for_prompt: true
-  });
+function randomString() {
+  const bytes = crypto.getRandomValues(new Uint8Array(24));
 
-  element.replaceChildren();
-
-  window.google.accounts.id.renderButton(element, {
-    type: "standard",
-    theme: "filled_black",
-    size: "large",
-    shape: "rectangular",
-    text,
-    logo_alignment: "center",
-    width: Math.min(element.clientWidth || 400, 400)
-  });
+  return Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export function googleSignOut() {
-  window.google?.accounts?.id?.disableAutoSelect();
+function openCentered(url) {
+  const width = 500;
+  const height = 640;
+  const left = window.screenX + (window.outerWidth - width) / 2;
+  const top = window.screenY + (window.outerHeight - height) / 2;
+
+  return window.open(
+    url,
+    "google-login",
+    `popup=yes,width=${width},height=${height},left=${left},top=${top}`
+  );
+}
+
+/*
+ * Precisa ser chamado direto no clique, senão o navegador
+ * bloqueia o popup.
+ */
+export function signInWithGoogle() {
+  const state = randomString();
+  const nonce = randomString();
+
+  const params = new URLSearchParams({
+    client_id: GOOGLE_CLIENT_ID,
+    redirect_uri: `${location.origin}/google-callback.html`,
+    response_type: "id_token",
+    scope: "openid email profile",
+    prompt: "select_account",
+    state,
+    nonce
+  });
+
+  const popup = openCentered(
+    `https://accounts.google.com/o/oauth2/v2/auth?${params}`
+  );
+
+  if (!popup) {
+    return Promise.reject(
+      new Error("O navegador bloqueou a janela do Google. Libere popups e tente de novo.")
+    );
+  }
+
+  return new Promise((resolve, reject) => {
+    const channel = new BroadcastChannel(CHANNEL);
+
+    const finish = (error, value) => {
+      clearTimeout(timeout);
+      channel.close();
+
+      try {
+        popup.close();
+      } catch {}
+
+      if (error) {
+        reject(error);
+      } else {
+        resolve(value);
+      }
+    };
+
+    channel.onmessage = event => {
+      const data = event.data || {};
+
+      if (data.state !== state) {
+        return;
+      }
+
+      if (data.error || !data.idToken) {
+        finish(
+          new Error(
+            data.error === "access_denied"
+              ? "Login com Google cancelado."
+              : "O Google não concluiu o login. Tente de novo."
+          )
+        );
+        return;
+      }
+
+      finish(null, { credential: data.idToken, nonce });
+    };
+
+    /*
+     * Não dá para detectar a janela fechada: o Google corta o
+     * vínculo com o popup (COOP) e popup.closed vira true na
+     * hora. Por isso a tela não trava esperando — o usuário pode
+     * clicar de novo a qualquer momento.
+     */
+    const timeout = setTimeout(() => {
+      finish(new Error("O login com Google expirou. Tente de novo."));
+    }, TIMEOUT_MS);
+  });
 }
