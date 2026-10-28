@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="referrer" content="no-referrer" />
+    <meta name="color-scheme" content="dark" />
+    <title>Transmitir jogo sem o Discord — ScreenCast</title>
+  </head>
+  <body>
+    <main class="guide">
+      <header class="guide-head">
+        <a class="brand small" href="/">
+          <span class="brand-mark">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2" /><path d="M8 20h8M12 16v4" /></svg>
+          </span>
+          <span class="brand-name">ScreenCast</span>
+        </a>
+        <span class="eyebrow">Guia · Windows</span>
+      </header>
+
+      <section class="guide-hero">
+        <h1>Transmitir um jogo sem o som do Discord</h1>
+        <p>
+          O navegador só consegue capturar o som do computador inteiro. A saída
+          é separar os dois no Windows: o jogo toca num “cabo virtual” que vai
+          para a transmissão, e o Discord toca direto no seu fone, por fora.
+        </p>
+        <div class="flow" aria-label="Como o som fica dividido">
+          <div class="flow-row">
+            <span class="flow-chip">Jogo</span>
+            <span class="flow-arrow" aria-hidden="true">→</span>
+            <span class="flow-chip accent">CABLE (padrão)</span>
+            <span class="flow-arrow" aria-hidden="true">→</span>
+            <span class="flow-chip success">Transmissão + seu fone</span>
+          </div>
+          <div class="flow-row">
+            <span class="flow-chip">Discord</span>
+            <span class="flow-arrow" aria-hidden="true">→</span>
+            <span class="flow-chip">Seu fone</span>
+            <span class="flow-arrow" aria-hidden="true">→</span>
+            <span class="flow-chip muted-chip">Fora da transmissão</span>
+          </div>
+        </div>
+      </section>
+
+      <p class="section-label">Configuração — só uma vez</p>
+
+      <ol class="steps">
+        <li class="step">
+          <span class="step-num">1</span>
+          <div class="step-body">
+            <h2>Instale o VB-Audio Virtual Cable (grátis)</h2>
+            <p>
+              Baixe em <a href="https://vb-audio.com/Cable/" target="_blank" rel="noopener noreferrer">vb-audio.com/Cable</a>,
+              extraia o .zip, clique com o botão direito em
+              <code>VBCABLE_Setup_x64.exe</code> → <strong>Executar como administrador</strong>
+              → <strong>Install Driver</strong>. Depois reinicie o PC.
+            </p>
+          </div>
+        </li>
+
+        <li class="step">
+          <span class="step-num">2</span>
+          <div class="step-body">
+            <h2>Coloque o cabo como saída padrão</h2>
+            <p>
+              Clique com o botão direito no ícone de som da barra de tarefas →
+              <strong>Configurações de som</strong> → em <strong>Saída</strong>, escolha
+              <strong>CABLE Input (VB-Audio Virtual Cable)</strong>.
+            </p>
+            <p class="step-note">Por enquanto você vai parar de ouvir o PC — o próximo passo resolve.</p>
+          </div>
+        </li>
+
+        <li class="step">
+          <span class="step-num">3</span>
+          <div class="step-body">
+            <h2>Continue ouvindo o jogo no seu fone</h2>
+            <p>
+              Aperte <kbd>Win</kbd> + <kbd>R</kbd>, digite <code>mmsys.cpl</code> e dê Enter.
+              Na aba <strong>Gravação</strong>, clique duas vezes em <strong>CABLE Output</strong> →
+              aba <strong>Escutar</strong> → marque <strong>Escutar este dispositivo</strong> →
+              em “Reprodução por este dispositivo”, escolha <strong>o seu fone ou caixa</strong> →
+              <strong>OK</strong>.
+            </p>
+          </div>
+        </li>
+
+        <li class="step">
+          <span class="step-num">4</span>
+          <div class="step-body">
+            <h2>Mande o Discord direto para o fone</h2>
+            <p>
+              No Discord: <strong>Configurações de usuário</strong> (engrenagem) →
+              <strong>Voz e vídeo</strong> → <strong>Dispositivo de saída</strong> → escolha
+              <strong>o seu fone ou caixa</strong>. Não deixe em “Padrão”, senão ele vai para o
+              cabo e entra na transmissão.
+            </p>
+          </div>
+        </li>
+      </ol>
+
+      <p class="section-label">Na hora de transmitir</p>
+
+      <ol class="steps" start="5">
+        <li class="step">
+          <span class="step-num">5</span>
+          <div class="step-body">
+            <h2>Compartilhe com o som do computador</h2>
+            <p>
+              No ScreenCast, clique em <strong>Compartilhar tela</strong> → em Áudio, escolha
+              <strong>Som do computador</strong> → <strong>Escolher tela</strong>. No seletor do
+              navegador, vá em <strong>Tela inteira</strong> e deixe marcado
+              <strong>Compartilhar áudio do sistema</strong>.
+            </p>
+          </div>
+        </li>
+
+        <li class="step highlight">
+          <span class="step-num">6</span>
+          <div class="step-body">
+            <h2>Faça o teste de 1 minuto</h2>
+            <p>
+              Com alguém assistindo e você numa call do Discord, fale algo na call e peça
+              para a pessoa dizer se ouviu <em>pela transmissão</em>. Se ouviu, confira o
+              passo 4 — o Discord provavelmente ainda está em “Padrão”.
+            </p>
+          </div>
+        </li>
+      </ol>
+
+      <section class="callouts">
+        <div class="callout">
+          <h3>Para desfazer</h3>
+          <p>
+            Volte a <strong>Saída</strong> do Windows para o seu fone (passo 2) e desmarque
+            “Escutar este dispositivo” (passo 3).
+          </p>
+        </div>
+        <div class="callout">
+          <h3>Tem dois aparelhos de som?</h3>
+          <p>
+            Ex.: fone e caixa do monitor. Dá para pular o cabo: deixe o jogo no aparelho
+            padrão do Windows e mande o Discord para o outro (passo 4).
+          </p>
+        </div>
+        <div class="callout">
+          <h3>Jogo no navegador ou vídeo?</h3>
+          <p>
+            Nem precisa disso: escolha <strong>Som da aba</strong> e compartilhe a aba. O
+            Discord nunca entra.
+          </p>
+        </div>
+      </section>
+
+      <footer class="guide-foot">
+        <a class="btn btn-primary btn-lg" href="/">Voltar ao ScreenCast</a>
+      </footer>
+    </main>
+
+    <script type="module" src="/client/src/guide.js"></script>
+  </body>
+</html>

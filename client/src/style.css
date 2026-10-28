@@ -747,6 +747,12 @@ button:disabled {
   line-height: 1.55;
 }
 
+.notice a {
+  color: var(--success);
+  font-weight: 600;
+  text-underline-offset: 2px;
+}
+
 /* =========================================================
    ROOM
 ========================================================= */

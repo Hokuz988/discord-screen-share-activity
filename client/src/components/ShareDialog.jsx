@@ -129,6 +129,10 @@ export function ShareDialog({ onConfirm, onClose }) {
             {prefs.audio === "tab"
               ? "No seletor, escolha a aba “Guia do Chrome” e marque “Compartilhar áudio da aba”."
               : "Para nunca vazar a call do Discord, prefira compartilhar uma aba com o som da aba."}
+            {" "}
+            <a href="/guia-audio.html" target="_blank" rel="noopener noreferrer">
+              Como transmitir um jogo sem o som do Discord ↗
+            </a>
           </p>
         </div>
 
