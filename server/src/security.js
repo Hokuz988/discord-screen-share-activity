@@ -130,6 +130,58 @@ const SCRYPT = {
   keylen: 32
 };
 
+/*
+ * Cada hash usa ~64 MiB. Em instâncias pequenas (Render free:
+ * 512 MB) poucos logins simultâneos derrubariam o processo, então
+ * no máximo 2 rodam juntos e o resto espera numa fila curta.
+ */
+const MAX_CONCURRENT_HASHES = 2;
+const MAX_QUEUED_HASHES = 64;
+
+let activeHashes = 0;
+const hashQueue = [];
+
+export class BusyError extends Error {
+  constructor() {
+    super("Servidor ocupado. Tente de novo em instantes.");
+    this.status = 503;
+  }
+}
+
+function acquireHashSlot() {
+  if (activeHashes < MAX_CONCURRENT_HASHES) {
+    activeHashes++;
+    return Promise.resolve();
+  }
+
+  if (hashQueue.length >= MAX_QUEUED_HASHES) {
+    return Promise.reject(new BusyError());
+  }
+
+  return new Promise(resolve => hashQueue.push(resolve));
+}
+
+/* Passa a vaga direto para o próximo da fila. */
+function releaseHashSlot() {
+  const next = hashQueue.shift();
+
+  if (next) {
+    next();
+  } else {
+    activeHashes--;
+  }
+}
+
+async function limitedScrypt(...args) {
+  await acquireHashSlot();
+
+  try {
+    return await scrypt(...args);
+  } finally {
+    releaseHashSlot();
+  }
+}
+
 function pepper(password) {
   return crypto
     .createHmac("sha256", PEPPER_KEY)
@@ -140,7 +192,7 @@ function pepper(password) {
 export async function hashPassword(password) {
   const salt = crypto.randomBytes(16);
 
-  const hash = await scrypt(
+  const hash = await limitedScrypt(
     pepper(password),
     salt,
     SCRYPT.keylen,
@@ -173,7 +225,7 @@ export async function verifyPassword(password, stored) {
   const expectedBuffer =
     Buffer.from(expected, "base64url");
 
-  const hash = await scrypt(
+  const hash = await limitedScrypt(
     pepper(password),
     Buffer.from(salt, "base64url"),
     expectedBuffer.length,

@@ -92,7 +92,12 @@ app.get("/turn-credentials", requireAuth, async (req, res) => {
         Authorization: `Bearer ${config.turnApiToken}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({ ttl: 900 })
+      /*
+       * Credencial vencida derruba transmissões longas que passam
+       * pelo TURN (a alocação não renova). 6 h cobre uma sessão de
+       * jogo; o cliente busca credenciais novas a cada 10 min.
+       */
+      body: JSON.stringify({ ttl: 6 * 60 * 60 })
     }
   );
 
@@ -119,6 +124,10 @@ app.use((error, _req, res, _next) => {
 
   if (error?.type === "entity.parse.failed") {
     return res.status(400).json({ error: "JSON inválido." });
+  }
+
+  if (error?.status === 503) {
+    return res.status(503).json({ error: error.message });
   }
 
   console.error("[HTTP]", error?.message || error);

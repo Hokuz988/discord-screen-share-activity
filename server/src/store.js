@@ -30,18 +30,30 @@ let data = {
 const byEmail = new Map();
 const byGoogle = new Map();
 
+function indexUser(user, previous = {}) {
+  if (previous.emailIdx && previous.emailIdx !== user.emailIdx) {
+    byEmail.delete(previous.emailIdx);
+  }
+
+  if (previous.googleIdx && previous.googleIdx !== user.googleIdx) {
+    byGoogle.delete(previous.googleIdx);
+  }
+
+  if (user.emailIdx) {
+    byEmail.set(user.emailIdx, user.id);
+  }
+
+  if (user.googleIdx) {
+    byGoogle.set(user.googleIdx, user.id);
+  }
+}
+
 function reindex() {
   byEmail.clear();
   byGoogle.clear();
 
   for (const user of Object.values(data.users)) {
-    if (user.emailIdx) {
-      byEmail.set(user.emailIdx, user.id);
-    }
-
-    if (user.googleIdx) {
-      byGoogle.set(user.googleIdx, user.id);
-    }
+    indexUser(user);
   }
 }
 
@@ -115,22 +127,34 @@ export async function createUser({
   await backend.saveUser(user);
 
   data.users[id] = user;
-  reindex();
+  indexUser(user);
 
   return user;
 }
 
 export async function updateUser(user, changes) {
-  if ("googleSub" in changes) {
-    user.googleIdx = changes.googleSub
-      ? blindIndex("google", changes.googleSub)
+  const next = { ...changes };
+
+  if ("googleSub" in next) {
+    next.googleIdx = next.googleSub
+      ? blindIndex("google", next.googleSub)
       : null;
 
-    delete changes.googleSub;
+    delete next.googleSub;
   }
 
-  Object.assign(user, changes);
-  reindex();
+  /* Login normal zera contadores que já estão zerados: não grava. */
+  if (Object.entries(next).every(([key, value]) => user[key] === value)) {
+    return user;
+  }
+
+  const previous = {
+    emailIdx: user.emailIdx,
+    googleIdx: user.googleIdx
+  };
+
+  Object.assign(user, next);
+  indexUser(user, previous);
 
   await backend.saveUser(user);
 

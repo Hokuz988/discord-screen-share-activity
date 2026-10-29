@@ -57,18 +57,116 @@ async function applySenderLimits(pc, preset) {
       continue;
     }
 
+    const params = sender.getParameters();
+
+    params.encodings = params.encodings?.length ? params.encodings : [{}];
+    params.encodings[0].maxBitrate = preset.bitrate;
+    params.encodings[0].maxFramerate = preset.fps;
+
     try {
-      const params = sender.getParameters();
-
-      params.encodings = params.encodings?.length ? params.encodings : [{}];
-      params.encodings[0].maxBitrate = preset.bitrate;
-      params.encodings[0].maxFramerate = preset.fps;
-      params.degradationPreference =
-        preset.hint === "motion" ? "maintain-framerate" : "maintain-resolution";
-
-      await sender.setParameters(params);
-    } catch {}
+      await sender.setParameters({
+        ...params,
+        degradationPreference:
+          preset.hint === "motion" ? "maintain-framerate" : "maintain-resolution"
+      });
+    } catch {
+      /* Navegador sem degradationPreference: aplica só os limites. */
+      try {
+        await sender.setParameters(params);
+      } catch {}
+    }
   }
+}
+
+/*
+ * Ordem de codecs medida em 1080p: AV1 e VP9 gastam bem menos
+ * banda que o VP8 para a mesma tela (ótimo para texto). Para
+ * jogos a 60 fps, H.264 costuma ter codificação por hardware na
+ * placa de vídeo e pesa menos na CPU. Quem assiste e não suporta
+ * o primeiro cai para o próximo automaticamente.
+ */
+const CODEC_ORDER = {
+  detail: ["video/AV1", "video/VP9", "video/VP8", "video/H264"],
+  motion: ["video/H264", "video/VP9", "video/VP8", "video/AV1"]
+};
+
+function preferCodecs(pc, preset) {
+  const receiver = globalThis.RTCRtpReceiver?.getCapabilities?.("video");
+  const sender = globalThis.RTCRtpSender?.getCapabilities?.("video");
+
+  if (!receiver || !sender) {
+    return;
+  }
+
+  /* Só prioriza o que este navegador consegue codificar. */
+  const canEncode = new Set(sender.codecs.map(codec => codec.mimeType));
+  const order = CODEC_ORDER[preset.hint].filter(mime => canEncode.has(mime));
+
+  const rank = codec => {
+    const index = order.indexOf(codec.mimeType);
+    return index === -1 ? order.length : index;
+  };
+
+  const codecs = [...receiver.codecs].sort((a, b) => rank(a) - rank(b));
+
+  for (const transceiver of pc.getTransceivers()) {
+    if (transceiver.sender.track?.kind === "video") {
+      try {
+        transceiver.setCodecPreferences(codecs);
+      } catch {}
+    }
+  }
+}
+
+/*
+ * O WebRTC começa em ~300 kbps e leva uns 15 s para chegar ao
+ * 1080p60. Começando em 2,5 Mbps, já sai em 1080p no 1º segundo
+ * (medido). Se a rede for pior, o controle de congestionamento
+ * reduz em seguida. Navegadores que não são Chromium ignoram.
+ */
+const START_BITRATE_KBPS = 2500;
+
+function withStartBitrate(description, preset) {
+  const kbps = Math.round(Math.min(START_BITRATE_KBPS * 1000, preset.bitrate) / 1000);
+  const lines = description.sdp.split("\r\n");
+  const videoPayloads = new Set();
+
+  for (const line of lines) {
+    const match = line.match(/^a=rtpmap:(\d+) (VP8|VP9|AV1|H264)\/90000/);
+
+    if (match) {
+      videoPayloads.add(match[1]);
+    }
+  }
+
+  const output = [];
+
+  for (const line of lines) {
+    const fmtp = line.match(/^a=fmtp:(\d+) /);
+
+    if (fmtp && videoPayloads.has(fmtp[1])) {
+      output.push(`${line};x-google-start-bitrate=${kbps}`);
+      videoPayloads.delete(fmtp[1]);
+      continue;
+    }
+
+    output.push(line);
+  }
+
+  /* Codecs sem linha fmtp (ex.: VP8) ganham uma. */
+  const result = [];
+
+  for (const line of output) {
+    result.push(line);
+
+    const rtpmap = line.match(/^a=rtpmap:(\d+) /);
+
+    if (rtpmap && videoPayloads.has(rtpmap[1])) {
+      result.push(`a=fmtp:${rtpmap[1]} x-google-start-bitrate=${kbps}`);
+    }
+  }
+
+  return { type: description.type, sdp: result.join("\r\n") };
 }
 
 const FALLBACK_ICE = [
@@ -293,6 +391,8 @@ export function useRoom({ token, onUnauthorized }) {
       pc.addTrack(track, stream);
     }
 
+    preferCodecs(pc, preset.current);
+
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === "failed") {
         closePeer(key);
@@ -385,7 +485,7 @@ export function useRoom({ token, onUnauthorized }) {
     }
 
     try {
-      await pc.setRemoteDescription(sdp);
+      await pc.setRemoteDescription(withStartBitrate(sdp, preset.current));
     } catch (err) {
       console.warn("[RTC] answer inválida", err);
       closePeer(`out:${viewerId}`);

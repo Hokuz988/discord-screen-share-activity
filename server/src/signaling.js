@@ -36,6 +36,27 @@ const joinLimited = createRateLimiter({
   max: 15
 });
 
+/*
+ * Limite por conexão: contador de janela fixa, sem timer. (Um
+ * createRateLimiter por conexão deixava um setInterval vivo para
+ * sempre a cada WebSocket aberto.)
+ */
+function createMessageBudget(max, windowMs) {
+  let windowStart = Date.now();
+  let count = 0;
+
+  return function overBudget() {
+    const now = Date.now();
+
+    if (now - windowStart > windowMs) {
+      windowStart = now;
+      count = 0;
+    }
+
+    return ++count > max;
+  };
+}
+
 /* =========================================================
    HELPERS
 ========================================================= */
@@ -346,10 +367,7 @@ export function attachSignaling(server) {
     ws.room = null;
     ws.isAlive = true;
 
-    const messageLimited = createRateLimiter({
-      windowMs: 10_000,
-      max: 120
-    });
+    const overBudget = createMessageBudget(120, 10_000);
 
     const authTimer = setTimeout(() => {
       if (!ws.user) {
@@ -362,7 +380,7 @@ export function attachSignaling(server) {
     });
 
     ws.on("message", raw => {
-      if (messageLimited("msg")) {
+      if (overBudget()) {
         return ws.close(4029, "rate limit");
       }
 
