@@ -176,6 +176,22 @@ const FALLBACK_ICE = [
 const ICE_CACHE_MS = 10 * 60 * 1000;
 const ICE_GATHER_TIMEOUT_MS = 4000;
 const RETRY_DELAY_MS = 2000;
+const OFFER_TIMEOUT_MS = 12_000;
+const KEEPALIVE_MS = 15_000;
+const SILENCE_LIMIT_MS = 40_000;
+const QUALITY_CHECK_MS = 5000;
+const QUALITY_STRIKES = 3;
+
+/*
+ * O navegador baixa a resolução quando falta CPU ou banda, e
+ * diz qual dos dois (qualityLimitationReason).
+ */
+const QUALITY_WARNING = {
+  cpu: height =>
+    `Seu PC não está dando conta e a imagem caiu para ${height}p. Feche programas pesados ou escolha uma qualidade menor.`,
+  bandwidth: height =>
+    `A internet está limitando a imagem a ${height}p (seu upload ou a rede de quem assiste).`
+};
 
 function stopTracks(stream) {
   stream?.getTracks().forEach(track => {
@@ -230,13 +246,14 @@ export function useRoom({ token, onUnauthorized }) {
 
   const ws = useRef(null);
   const myId = useRef("");
+  const resumeKey = useRef("");
   const roomRef = useRef(null);
   const pendingRoom = useRef(null);
   const localStream = useRef(null);
   const sharingRef = useRef(false);
   const streams = useRef(new Map());
   const peers = useRef(new Map());
-  const requested = useRef(new Set());
+  const requested = useRef(new Map());
   const activeProducers = useRef(new Set());
   const iceCache = useRef({ servers: null, at: 0 });
   const preset = useRef(QUALITY_PRESETS.balanced);
@@ -262,13 +279,13 @@ export function useRoom({ token, onUnauthorized }) {
 
   /* ----------------------- NOTICES ------------------------ */
 
-  function notify(text) {
+  function notify(text, duration = 4000) {
     const id = ++noticeId.current;
 
     setNotices(list => [...list.slice(-2), { id, text }]);
     setTimeout(() => {
       setNotices(list => list.filter(item => item.id !== id));
-    }, 4000);
+    }, duration);
   }
 
   /* ------------------------- ICE -------------------------- */
@@ -317,9 +334,35 @@ export function useRoom({ token, onUnauthorized }) {
     }
   }
 
+  function clearRequest(producerId) {
+    clearTimeout(requested.current.get(producerId));
+    requested.current.delete(producerId);
+  }
+
+  function clearRequests() {
+    for (const id of [...requested.current.keys()]) {
+      clearRequest(id);
+    }
+  }
+
+  /* Reconectou com id novo: quem nos conhecia usa o antigo. */
+  function dropRemotePeers() {
+    closeAllPeers();
+    clearRequests();
+    sharingRef.current = false;
+
+    for (const id of [...streams.current.keys()]) {
+      if (id !== "local") {
+        streams.current.delete(id);
+      }
+    }
+
+    refresh();
+  }
+
   function removeRemote(producerId) {
     closePeer(`in:${producerId}`);
-    requested.current.delete(producerId);
+    clearRequest(producerId);
     activeProducers.current.delete(producerId);
 
     if (streams.current.delete(producerId)) {
@@ -336,12 +379,25 @@ export function useRoom({ token, onUnauthorized }) {
       return;
     }
 
-    requested.current.add(producerId);
-    send({ type: "request-offer", producerId });
+    if (!send({ type: "request-offer", producerId })) {
+      return;
+    }
+
+    /* Producer reconectando perde o pedido: sem oferta, pede de novo. */
+    requested.current.set(
+      producerId,
+      setTimeout(() => {
+        requested.current.delete(producerId);
+
+        if (activeProducers.current.has(producerId)) {
+          requestOffer(producerId);
+        }
+      }, OFFER_TIMEOUT_MS)
+    );
   }
 
   function retryLater(producerId) {
-    requested.current.delete(producerId);
+    clearRequest(producerId);
 
     setTimeout(() => {
       if (activeProducers.current.has(producerId)) {
@@ -444,7 +500,7 @@ export function useRoom({ token, onUnauthorized }) {
 
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === "connected") {
-        requested.current.delete(producerId);
+        clearRequest(producerId);
       }
 
       if (pc.connectionState === "failed") {
@@ -648,7 +704,7 @@ export function useRoom({ token, onUnauthorized }) {
       streams.current.delete(id);
     }
 
-    requested.current.clear();
+    clearRequests();
     activeProducers.current.clear();
     producerNames.current.clear();
     roomRef.current = null;
@@ -775,8 +831,28 @@ export function useRoom({ token, onUnauthorized }) {
 
   const handlers = {
     ready(msg) {
+      const resumed = Boolean(msg.resumed && roomRef.current);
+
       myId.current = msg.id;
+      resumeKey.current = msg.resume || "";
       setConnection("online");
+
+      /* Mesma vaga na sala: o vídeo nem chegou a cair. */
+      if (resumed) {
+        sharingRef.current = Boolean(msg.producing);
+
+        if (localStream.current && !msg.producing) {
+          send({ type: "start-sharing" });
+        }
+
+        if (!localStream.current && msg.producing) {
+          send({ type: "stop-sharing" });
+        }
+
+        return;
+      }
+
+      dropRemotePeers();
 
       /* Reconectou estando numa sala: volta para ela. */
       const current = roomRef.current;
@@ -840,22 +916,100 @@ export function useRoom({ token, onUnauthorized }) {
     let retryTimer = null;
 
     function connect() {
-      setConnection("connecting");
+      setConnection(current => (current === "offline" ? current : "connecting"));
 
       const socket = new WebSocket(SIGNALING_URL);
+      let heardAt = Date.now();
+      let answersPing = false;
+      let gone = false;
+
       ws.current = socket;
+
+      /*
+       * Proxies no caminho (Discord, Cloudflare) fecham WebSocket
+       * sem tráfego (~100 s no Cloudflare), e o Render grátis dorme
+       * sem mensagens chegando. O ping mantém os dois acordados e,
+       * se o servidor parar de responder, larga o socket morto em
+       * vez de esperar o TCP desistir.
+       */
+      const keepAlive = setInterval(() => {
+        if (socket.readyState !== WebSocket.OPEN) {
+          return;
+        }
+
+        /* Servidor antigo não responde ping: aí não dá para medir silêncio. */
+        if (answersPing && Date.now() - heardAt > SILENCE_LIMIT_MS) {
+          try {
+            socket.close(4000, "stale");
+          } catch {}
+
+          lost(4000);
+          return;
+        }
+
+        socket.send(JSON.stringify({ type: "ping" }));
+      }, KEEPALIVE_MS);
+
+      /*
+       * Não fecha os peers: o vídeo vai direto entre navegadores e
+       * segue rodando. Se o servidor devolver a mesma vaga (ready
+       * com resumed), nada é refeito.
+       */
+      function lost(code) {
+        if (gone) {
+          return;
+        }
+
+        gone = true;
+        clearInterval(keepAlive);
+        socket.onmessage = null;
+
+        if (ws.current === socket) {
+          ws.current = null;
+        }
+
+        if (!alive) {
+          return;
+        }
+
+        setConnection("offline");
+
+        if (code === 4001) {
+          resetRoom();
+          onUnauthorizedRef.current?.();
+          return;
+        }
+
+        const delay = Math.min(15000, 1000 * 2 ** attempts++);
+        retryTimer = setTimeout(connect, delay);
+      }
 
       socket.onopen = () => {
         attempts = 0;
-        socket.send(JSON.stringify({ type: "auth", token }));
+        heardAt = Date.now();
+
+        socket.send(JSON.stringify({
+          type: "auth",
+          token,
+          resume: roomRef.current && resumeKey.current
+            ? { id: myId.current, key: resumeKey.current }
+            : undefined
+        }));
       };
 
       socket.onmessage = event => {
+        heardAt = Date.now();
+
         let msg;
 
         try {
           msg = JSON.parse(event.data);
         } catch {
+          return;
+        }
+
+        if (msg?.type === "pong") {
+          answersPing = true;
           return;
         }
 
@@ -868,45 +1022,19 @@ export function useRoom({ token, onUnauthorized }) {
         }
       };
 
-      socket.onclose = event => {
-        if (ws.current === socket) {
-          ws.current = null;
-        }
-
-        if (!alive) {
-          return;
-        }
-
-        setConnection("offline");
-
-        /* Peers dependem do id antigo; refaz tudo ao voltar. */
-        closeAllPeers();
-        requested.current.clear();
-        sharingRef.current = false;
-
-        for (const id of [...streams.current.keys()]) {
-          if (id !== "local") {
-            streams.current.delete(id);
-          }
-        }
-
-        refresh();
-
-        if (event.code === 4001) {
-          resetRoom();
-          onUnauthorizedRef.current?.();
-          return;
-        }
-
-        const delay = Math.min(15000, 1000 * 2 ** attempts++);
-        retryTimer = setTimeout(connect, delay);
-      };
+      socket.onclose = event => lost(event.code);
     }
+
+    /* Fechou a atividade: sai já, sem esperar a vaga expirar. */
+    const leave = () => send({ type: "leave-room" });
+
+    window.addEventListener("pagehide", leave);
 
     connect();
 
     return () => {
       alive = false;
+      window.removeEventListener("pagehide", leave);
       clearTimeout(retryTimer);
 
       try {
@@ -917,6 +1045,55 @@ export function useRoom({ token, onUnauthorized }) {
       resetRoom();
     };
   }, [token]);
+
+  /* ----------------------- QUALITY ------------------------ */
+
+  /*
+   * Quem transmite fica sabendo quando a imagem enviada cai
+   * abaixo de 720p e por quê. Pega o pior entre os viewers.
+   */
+  useEffect(() => {
+    if (!sharing) {
+      return;
+    }
+
+    let strikes = 0;
+    const warned = new Set();
+
+    const timer = setInterval(async () => {
+      let worst = null;
+
+      for (const [key, pc] of peers.current) {
+        if (!key.startsWith("out:")) {
+          continue;
+        }
+
+        const report = await pc.getStats().catch(() => null);
+
+        report?.forEach(stat => {
+          if (
+            stat.type === "outbound-rtp" &&
+            stat.kind === "video" &&
+            stat.frameHeight &&
+            (!worst || stat.frameHeight < worst.frameHeight)
+          ) {
+            worst = stat;
+          }
+        });
+      }
+
+      const reason = worst?.qualityLimitationReason;
+
+      strikes = worst?.frameHeight < 720 && QUALITY_WARNING[reason] ? strikes + 1 : 0;
+
+      if (strikes >= QUALITY_STRIKES && !warned.has(reason)) {
+        warned.add(reason);
+        notify(QUALITY_WARNING[reason](worst.frameHeight), 10_000);
+      }
+    }, QUALITY_CHECK_MS);
+
+    return () => clearInterval(timer);
+  }, [sharing]);
 
   /* ------------------------ VIEW -------------------------- */
 

@@ -18,18 +18,25 @@ import { resolveSession } from "./store.js";
       AES-GCM cifrado com a chave da sala. O servidor só
       repassa — não lê SDP, IPs nem fingerprints DTLS, e
       não consegue forjar uma oferta (MITM).
+   4. "ready" traz uma chave de retomada. Se o socket cair, o
+      cliente reautentica com {resume:{id, key}} e recupera a
+      mesma vaga em até RESUME_GRACE_MS.
 ========================================================= */
 
 const WS_OPEN = 1;
 
 const AUTH_TIMEOUT_MS = 10_000;
 const EMPTY_ROOM_TTL_MS = 60_000;
+const RESUME_GRACE_MS = 30_000;
 const MAX_SIGNAL_BYTES = 48 * 1024;
 
 const ROOM_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const ROOM_CODE_LENGTH = 8;
 
 const rooms = new Map();
+
+/* id → conexão autenticada (aberta ou aguardando retomada). */
+const identities = new Map();
 
 const joinLimited = createRateLimiter({
   windowMs: 60_000,
@@ -191,10 +198,66 @@ function enterRoom(ws, room) {
 }
 
 /* =========================================================
+   QUEDAS CURTAS
+   O vídeo vai direto entre os navegadores; o servidor só
+   apresenta um ao outro. Se o WebSocket cair (Wi-Fi, proxy),
+   a vaga fica guardada um tempo: quem volta com a chave de
+   retomada recupera o mesmo id, sala e transmissão, e as
+   conexões WebRTC continuam de pé.
+========================================================= */
+
+function release(ws) {
+  clearTimeout(ws.parkTimer);
+
+  if (identities.get(ws.id) === ws) {
+    identities.delete(ws.id);
+  }
+
+  leaveRoom(ws);
+}
+
+function resume(ws, data) {
+  const old = identities.get(String(data?.id || ""));
+
+  if (
+    !old ||
+    !old.room ||
+    old.sessionHash !== ws.sessionHash ||
+    !safeEqual(old.resumeKey, data.key)
+  ) {
+    return false;
+  }
+
+  const room = old.room;
+
+  /* A conexão antiga pode estar meio aberta: derruba sem sair da sala. */
+  clearTimeout(old.parkTimer);
+  old.replaced = true;
+  old.room = null;
+  old.terminate();
+
+  ws.id = old.id;
+  ws.room = room;
+
+  room.clients.delete(old);
+  room.clients.add(ws);
+
+  if (room.producers.get(ws.id) === old) {
+    room.producers.set(ws.id, ws);
+  }
+
+  return true;
+}
+
+/* =========================================================
    HANDLERS
 ========================================================= */
 
 const handlers = {
+
+  ping(ws) {
+    send(ws, { type: "pong" });
+  },
 
   "create-room"(ws, msg) {
     if (!isValidKeyCheck(msg.keyCheck)) {
@@ -380,6 +443,8 @@ export function attachSignaling(server) {
     });
 
     ws.on("message", raw => {
+      ws.isAlive = true;
+
       if (overBudget()) {
         return ws.close(4029, "rate limit");
       }
@@ -410,12 +475,29 @@ export function attachSignaling(server) {
         clearTimeout(authTimer);
 
         ws.sessionHash = session.hash;
+        ws.resumeKey = crypto.randomBytes(24).toString("base64url");
         ws.user = {
           id: session.user.id,
           name: decrypt(session.user.nameEnc, `name:${session.user.id}`)
         };
 
-        return send(ws, { type: "ready", id: ws.id });
+        const resumed = resume(ws, msg.resume);
+
+        identities.set(ws.id, ws);
+
+        send(ws, {
+          type: "ready",
+          id: ws.id,
+          resume: ws.resumeKey,
+          resumed,
+          producing: resumed && ws.room.producers.has(ws.id)
+        });
+
+        if (resumed) {
+          syncRoom(ws.room);
+        }
+
+        return;
       }
 
       const handler = Object.hasOwn(handlers, msg.type)
@@ -427,9 +509,20 @@ export function attachSignaling(server) {
       }
     });
 
-    ws.on("close", () => {
+    ws.on("close", code => {
       clearTimeout(authTimer);
-      leaveRoom(ws);
+
+      if (ws.replaced) {
+        return;
+      }
+
+      /* 1000/1001: saiu de propósito (fechou a aba ou a atividade). */
+      if (ws.room && !ws.noResume && code !== 1000 && code !== 1001) {
+        ws.parkTimer = setTimeout(() => release(ws), RESUME_GRACE_MS);
+        return;
+      }
+
+      release(ws);
     });
 
     ws.on("error", () => {});
@@ -460,9 +553,17 @@ export function attachSignaling(server) {
     closeSessions(hashes) {
       const revoked = new Set(hashes);
 
-      for (const ws of wss.clients) {
-        if (revoked.has(ws.sessionHash)) {
+      for (const ws of identities.values()) {
+        if (!revoked.has(ws.sessionHash)) {
+          continue;
+        }
+
+        ws.noResume = true;
+
+        if (ws.readyState === WS_OPEN) {
           ws.close(4001, "session revoked");
+        } else {
+          release(ws);
         }
       }
     },
