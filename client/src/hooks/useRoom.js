@@ -87,10 +87,45 @@ async function applySenderLimits(pc, preset) {
  */
 const CODEC_ORDER = {
   detail: ["video/AV1", "video/VP9", "video/VP8", "video/H264"],
-  motion: ["video/H264", "video/VP9", "video/VP8", "video/AV1"]
+  motion: ["video/H264", "video/VP9", "video/VP8", "video/AV1"],
+  /* PC sem folga de CPU: AV1/VP9 por software derrubam o fps. */
+  light: ["video/H264", "video/VP8", "video/VP9", "video/AV1"]
 };
 
-function preferCodecs(pc, preset) {
+/*
+ * Troca para o codec mais leve sem renegociar
+ * (encodings[].codec, Chromium 126+). Navegador sem suporte
+ * ignora o campo.
+ */
+async function switchToLightCodec(pc) {
+  const canEncode = new Set(
+    (globalThis.RTCRtpSender?.getCapabilities?.("video")?.codecs || []).map(codec => codec.mimeType)
+  );
+
+  for (const sender of pc.getSenders()) {
+    if (sender.track?.kind !== "video") {
+      continue;
+    }
+
+    const params = sender.getParameters();
+    const codec = CODEC_ORDER.light
+      .filter(mime => canEncode.has(mime))
+      .map(mime => params.codecs?.find(item => item.mimeType === mime))
+      .find(Boolean);
+
+    if (!codec || !params.encodings?.length) {
+      continue;
+    }
+
+    params.encodings[0].codec = codec;
+
+    try {
+      await sender.setParameters(params);
+    } catch {}
+  }
+}
+
+function preferCodecs(pc, preset, light = false) {
   const receiver = globalThis.RTCRtpReceiver?.getCapabilities?.("video");
   const sender = globalThis.RTCRtpSender?.getCapabilities?.("video");
 
@@ -100,7 +135,7 @@ function preferCodecs(pc, preset) {
 
   /* Só prioriza o que este navegador consegue codificar. */
   const canEncode = new Set(sender.codecs.map(codec => codec.mimeType));
-  const order = CODEC_ORDER[preset.hint].filter(mime => canEncode.has(mime));
+  const order = CODEC_ORDER[light ? "light" : preset.hint].filter(mime => canEncode.has(mime));
 
   const rank = codec => {
     const index = order.indexOf(codec.mimeType);
@@ -178,19 +213,19 @@ const ICE_GATHER_TIMEOUT_MS = 4000;
 const RETRY_DELAY_MS = 2000;
 const OFFER_TIMEOUT_MS = 12_000;
 const KEEPALIVE_MS = 15_000;
-const SILENCE_LIMIT_MS = 40_000;
+const SILENCE_LIMIT_MS = 25_000;
 const QUALITY_CHECK_MS = 5000;
 const QUALITY_STRIKES = 3;
 
 /*
- * O navegador baixa a resolução quando falta CPU ou banda, e
- * diz qual dos dois (qualityLimitationReason).
+ * O navegador baixa a resolução ou o fps quando falta CPU ou
+ * banda, e diz qual dos dois (qualityLimitationReason).
  */
 const QUALITY_WARNING = {
-  cpu: height =>
-    `Seu PC não está dando conta e a imagem caiu para ${height}p. Feche programas pesados ou escolha uma qualidade menor.`,
-  bandwidth: height =>
-    `A internet está limitando a imagem a ${height}p (seu upload ou a rede de quem assiste).`
+  cpu: (height, fps) =>
+    `Seu PC não está dando conta: a imagem está saindo em ${height}p a ${fps} fps. Feche programas pesados ou escolha uma qualidade menor.`,
+  bandwidth: (height, fps) =>
+    `A internet está limitando a imagem a ${height}p e ${fps} fps (seu upload ou a rede de quem assiste).`
 };
 
 function stopTracks(stream) {
@@ -257,6 +292,7 @@ export function useRoom({ token, onUnauthorized }) {
   const activeProducers = useRef(new Set());
   const iceCache = useRef({ servers: null, at: 0 });
   const preset = useRef(QUALITY_PRESETS.balanced);
+  const lightCodec = useRef(false);
   const producerNames = useRef(new Map());
   const namesSeeded = useRef(false);
   const noticeId = useRef(0);
@@ -447,7 +483,7 @@ export function useRoom({ token, onUnauthorized }) {
       pc.addTrack(track, stream);
     }
 
-    preferCodecs(pc, preset.current);
+    preferCodecs(pc, preset.current, lightCodec.current);
 
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === "failed") {
@@ -617,6 +653,7 @@ export function useRoom({ token, onUnauthorized }) {
     setError("");
 
     preset.current = QUALITY_PRESETS[options.quality] || QUALITY_PRESETS.balanced;
+    lightCodec.current = false;
 
     let stream;
 
@@ -920,6 +957,7 @@ export function useRoom({ token, onUnauthorized }) {
 
       const socket = new WebSocket(SIGNALING_URL);
       let heardAt = Date.now();
+      let pingAt = 0;
       let answersPing = false;
       let gone = false;
 
@@ -937,8 +975,14 @@ export function useRoom({ token, onUnauthorized }) {
           return;
         }
 
-        /* Servidor antigo não responde ping: aí não dá para medir silêncio. */
-        if (answersPing && Date.now() - heardAt > SILENCE_LIMIT_MS) {
+        /*
+         * Mede o ping mais antigo sem resposta, não o tempo desde a
+         * última mensagem: em aba de fundo o Chrome roda isto só 1x
+         * por minuto. Servidor antigo não responde ping; aí não mede.
+         */
+        if (heardAt >= pingAt) {
+          pingAt = Date.now();
+        } else if (answersPing && Date.now() - pingAt > SILENCE_LIMIT_MS) {
           try {
             socket.close(4000, "stale");
           } catch {}
@@ -1049,8 +1093,9 @@ export function useRoom({ token, onUnauthorized }) {
   /* ----------------------- QUALITY ------------------------ */
 
   /*
-   * Quem transmite fica sabendo quando a imagem enviada cai
-   * abaixo de 720p e por quê. Pega o pior entre os viewers.
+   * A imagem enviada caiu abaixo de 720p ou de 70% do fps
+   * escolhido. Se for CPU, troca primeiro para um codec leve;
+   * se não resolver (ou for a internet), avisa quem transmite.
    */
   useEffect(() => {
     if (!sharing) {
@@ -1061,7 +1106,8 @@ export function useRoom({ token, onUnauthorized }) {
     const warned = new Set();
 
     const timer = setInterval(async () => {
-      let worst = null;
+      const minFps = preset.current.fps * 0.7;
+      let limited = null;
 
       for (const [key, pc] of peers.current) {
         if (!key.startsWith("out:")) {
@@ -1075,20 +1121,42 @@ export function useRoom({ token, onUnauthorized }) {
             stat.type === "outbound-rtp" &&
             stat.kind === "video" &&
             stat.frameHeight &&
-            (!worst || stat.frameHeight < worst.frameHeight)
+            QUALITY_WARNING[stat.qualityLimitationReason] &&
+            (stat.frameHeight < 720 || (stat.framesPerSecond || 0) < minFps)
           ) {
-            worst = stat;
+            limited ||= stat;
           }
         });
       }
 
-      const reason = worst?.qualityLimitationReason;
+      strikes = limited ? strikes + 1 : 0;
 
-      strikes = worst?.frameHeight < 720 && QUALITY_WARNING[reason] ? strikes + 1 : 0;
+      if (strikes < QUALITY_STRIKES) {
+        return;
+      }
 
-      if (strikes >= QUALITY_STRIKES && !warned.has(reason)) {
+      strikes = 0;
+
+      const reason = limited.qualityLimitationReason;
+
+      if (reason === "cpu" && !lightCodec.current) {
+        lightCodec.current = true;
+
+        for (const [key, pc] of peers.current) {
+          if (key.startsWith("out:")) {
+            switchToLightCodec(pc);
+          }
+        }
+
+        return;
+      }
+
+      if (!warned.has(reason)) {
         warned.add(reason);
-        notify(QUALITY_WARNING[reason](worst.frameHeight), 10_000);
+        notify(
+          QUALITY_WARNING[reason](limited.frameHeight, Math.round(limited.framesPerSecond || 0)),
+          10_000
+        );
       }
     }, QUALITY_CHECK_MS);
 
